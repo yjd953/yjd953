@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="https://aka.doubaocdn.com/s/hltThDxzNG" alt="Banner" width="100%" />
+<img src="./banner.svg" alt="Banner" width="100%" />
 
 [![Typing SVG](https://readme-typing-svg.demolab.com?font=Fira+Code&size=22&pause=1000&color=00D9FF&center=true&vCenter=true&width=600&lines=Agent+Engineer+%40+ByteDance;Building+Intelligent+Agent+Systems;LLM+%7C+RAG+%7C+Tool+Use+%7C+Multi-Agent;Passionate+about+AI+Infrastructure)](https://git.io/typing-svg)
 
@@ -58,7 +58,7 @@ I'm an **Agent Engineer** at ByteDance, focused on building production-grade int
 
 ![Top Languages](https://github-readme-stats.vercel.app/api/top-langs/?username=yjd953&layout=compact&theme=tokyonight&hide_border=true&bg_color=0d1117&title_color=00d9ff&text_color=c9d1d9)
 
-![GitHub Streak](https://github-readme-streak-stats.herokuapp.com/?user=yjd953&theme=tokyonight&hide_border=true&background=0d1117&ring=00d9ff&fire=79ff97&currStreakLabel=00d9ff)
+![GitHub Streak](https://streak-stats.demolab.com/?user=yjd953&theme=tokyonight&hide_border=true&background=0d1117&ring=00d9ff&fire=79ff97&currStreakLabel=00d9ff)
 
 </div>
 
