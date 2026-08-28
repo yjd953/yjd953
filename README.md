@@ -1,105 +1,105 @@
 <div align="center">
-
-<img src="./banner.svg" alt="Banner" width="100%" />
-
-[![Typing SVG](https://readme-typing-svg.demolab.com?font=Fira+Code&size=22&pause=1000&color=00D9FF&center=true&vCenter=true&width=600&lines=Agent+Engineer+%40+ByteDance;Building+Intelligent+Agent+Systems;LLM+%7C+RAG+%7C+Tool+Use+%7C+Multi-Agent;Passionate+about+AI+Infrastructure)](https://git.io/typing-svg)
-
+  <img src="./assets/hero.svg" width="100%" alt="Dale Yang — Agent Engineer" />
 </div>
 
----
-
-### 👋 About Me
-
-I'm an **Agent Engineer** at ByteDance, focused on building production-grade intelligent agent systems. My work spans LLM application architecture, retrieval-augmented generation, tool-use orchestration, and multi-agent collaboration frameworks. I care deeply about agent reliability, evaluation, and scaling AI infra.
-
-- 🔭 Currently building **agent orchestration platforms** and **LLM evaluation pipelines**
-- 🌱 Deep diving into **multi-agent systems**, **agent memory**, and **reasoning optimization**
-- 💬 Ask me about **LLM ops**, **RAG architecture**, or **agent design patterns**
-- 📫 Reach me at **REMOVED**
-
----
-
-### 🛠 Tech Stack
+<br/>
 
 <div align="center">
-
-**Languages**
-
-![Python](https://img.shields.io/badge/Python-3776AB?style=for-the-badge&logo=python&logoColor=white)
-![Go](https://img.shields.io/badge/Go-00ADD8?style=for-the-badge&logo=go&logoColor=white)
-![TypeScript](https://img.shields.io/badge/TypeScript-3178C6?style=for-the-badge&logo=typescript&logoColor=white)
-![Rust](https://img.shields.io/badge/Rust-000000?style=for-the-badge&logo=rust&logoColor=white)
-
-**AI & Agent**
-
-![PyTorch](https://img.shields.io/badge/PyTorch-EE4C2C?style=for-the-badge&logo=pytorch&logoColor=white)
-![LangChain](https://img.shields.io/badge/LangChain-1C3C3C?style=for-the-badge&logo=langchain&logoColor=white)
-![LangGraph](https://img.shields.io/badge/LangGraph-1C3C3C?style=for-the-badge&logo=langgraph&logoColor=white)
-![HuggingFace](https://img.shields.io/badge/HuggingFace-FFD21E?style=for-the-badge&logo=huggingface&logoColor=black)
-![vLLM](https://img.shields.io/badge/vLLM-4FC3F7?style=for-the-badge&logo=vllm&logoColor=white)
-
-**Infra & Tools**
-
-![Docker](https://img.shields.io/badge/Docker-2496ED?style=for-the-badge&logo=docker&logoColor=white)
-![Kubernetes](https://img.shields.io/badge/Kubernetes-326CE5?style=for-the-badge&logo=kubernetes&logoColor=white)
-![Redis](https://img.shields.io/badge/Redis-DC382D?style=for-the-badge&logo=redis&logoColor=white)
-![PostgreSQL](https://img.shields.io/badge/PostgreSQL-4169E1?style=for-the-badge&logo=postgresql&logoColor=white)
-![Git](https://img.shields.io/badge/Git-F05032?style=for-the-badge&logo=git&logoColor=white)
-
+  <a href="https://yjd953.github.io/yjd953/"><b>Engineering Notes</b></a>
+  &nbsp;·&nbsp;
+  <a href="https://github.com/yjd953?tab=repositories"><b>Projects</b></a>
+  &nbsp;·&nbsp;
+  <a href="https://github.com/yjd953/yjd953/issues"><b>Guestbook</b></a>
 </div>
 
----
+<br/>
 
-### 📊 GitHub Stats
+> I build reliable AI agents that can reason, use tools, retrieve knowledge, and finish real-world tasks.
+
+## Profile
+
+Agent Engineer at **ByteDance**, working around production-grade agent systems: orchestration, tool use, retrieval, memory, evaluation, observability, and human-in-the-loop workflows.
+
+```text
+FOCUS     Agent Runtime · RAG · Tool Use · Multi-Agent · Evaluation
+BUILDING  Reliable systems that turn model capability into shipped products
+PRINCIPLE Observable by default · Fail safely · Keep humans in control
+```
+
+## Agent engineering map
 
 <div align="center">
-
-![GitHub Stats](https://github-readme-stats.vercel.app/api?username=yjd953&show_icons=true&theme=tokyonight&hide_border=true&bg_color=0d1117&title_color=00d9ff&icon_color=79ff97&text_color=c9d1d9)
-
-![Top Languages](https://github-readme-stats.vercel.app/api/top-langs/?username=yjd953&layout=compact&theme=tokyonight&hide_border=true&bg_color=0d1117&title_color=00d9ff&text_color=c9d1d9)
-
-![GitHub Streak](https://streak-stats.demolab.com/?user=yjd953&theme=tokyonight&hide_border=true&background=0d1117&ring=00d9ff&fire=79ff97&currStreakLabel=00d9ff)
-
+  <img src="./assets/agent-map.svg" width="100%" alt="Agent engineering capability map" />
 </div>
 
----
+## Featured build
 
-### 🏆 GitHub Trophies
+<table>
+<tr>
+<td width="62%" valign="top">
+
+### Math Practice Mini Program
+
+A handwriting-first arithmetic practice experience with OCR-based grading, learning history, mistake review, and an AI learning assistant.
+
+**System highlights**
+- Handwriting input and OCR recognition
+- Automated grading and mistake review
+- Learning history and progress feedback
+- AI-assisted learning interactions
+
+[Explore repository →](https://github.com/yjd953/Math-Practice-Mini-Program)
+
+</td>
+<td width="38%" valign="top">
+  <img src="./assets/project-card.svg" width="100%" alt="Math Practice Mini Program project card" />
+</td>
+</tr>
+</table>
+
+## Engineering notes
+
+I use the blog as a public engineering notebook: fewer hot takes, more system diagrams, trade-offs, failure modes, and reusable checklists.
+
+| Note | What it covers |
+|---|---|
+| [From Demo to Production: Four Reliability Pillars for Agents](https://yjd953.github.io/yjd953/posts/agent-reliability.html) | Control loops, state, tools, evaluation, and observability |
+| [A Practical Tool-Use Checklist](https://yjd953.github.io/yjd953/posts/tool-use-checklist.html) | Contracts, permissions, idempotency, retries, and verification |
+| [Open the full notebook](https://yjd953.github.io/yjd953/) | All essays, notes, and future experiments |
+
+## Current operating system
 
 <div align="center">
-
-![Trophies](https://github-profile-trophy.vercel.app/?username=yjd953&theme=tokyonight&no-frame=true&row=1&column=7&margin-w=5)
-
+  <img src="./assets/now.svg" width="100%" alt="Current focus and working principles" />
 </div>
 
----
-
-### 🐍 Contribution Snake
+## Activity
 
 <div align="center">
-
-![Snake Animation](https://github.com/yjd953/yjd953/blob/output/github-snake.svg)
-
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/yjd953/yjd953/output/github-snake-dark.svg" />
+    <source media="(prefers-color-scheme: light)" srcset="https://raw.githubusercontent.com/yjd953/yjd953/output/github-snake.svg" />
+    <img alt="GitHub contribution snake" src="https://raw.githubusercontent.com/yjd953/yjd953/output/github-snake.svg" width="100%" />
+  </picture>
 </div>
 
-> To enable the snake animation, add the [snake action workflow](https://github.com/Platane/snk) to your profile repo.
+<details>
+<summary><b>How I think about production agents</b></summary>
+<br/>
 
----
+1. **A model is a component, not the system.** State, permissions, tools, fallbacks, and observability define the product.
+2. **Every tool call is a transaction.** Validate inputs, constrain effects, preserve idempotency, and verify outputs.
+3. **Evaluation is part of development.** Offline suites, online signals, trace review, and regression gates must work together.
+4. **Human control is a feature.** High-impact actions need clear boundaries, checkpoints, and reversible execution.
 
-### 📝 Recent Blog Posts
-
-<!-- BLOG-POST-LIST:START -->
-<!-- BLOG-POST-LIST:END -->
-
-> Add the [blog post workflow](https://github.com/gautamkrishnar/blog-post-workflow) to auto-sync your blog.
+</details>
 
 ---
 
 <div align="center">
-
-![Visitor Count](https://visitor-badge.laobi.icu/badge?page_id=yjd953.yjd953)
-
-[![Email](https://img.shields.io/badge/Email-D14836?style=for-the-badge&logo=gmail&logoColor=white)](mailto:REMOVED)
-[![GitHub](https://img.shields.io/badge/GitHub-100000?style=for-the-badge&logo=github&logoColor=white)](https://github.com/yjd953)
-
+  <sub>Building agents that do useful work — reliably.</sub>
+  <br/><br/>
+  <a href="https://github.com/yjd953/yjd953/issues/new?title=Hello%20Dale"><b>Start a conversation</b></a>
+  &nbsp;·&nbsp;
+  <a href="https://github.com/yjd953"><b>Follow on GitHub</b></a>
 </div>
