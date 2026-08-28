@@ -32,31 +32,6 @@ PRINCIPLE Observable by default · Fail safely · Keep humans in control
   <img src="./assets/agent-map.png" width="100%" alt="Agent engineering capability map" />
 </div>
 
-## Featured build
-
-<table>
-<tr>
-<td width="62%" valign="top">
-
-### Math Practice Mini Program
-
-A handwriting-first arithmetic practice experience with OCR-based grading, learning history, mistake review, and an AI learning assistant.
-
-**System highlights**
-- Handwriting input and OCR recognition
-- Automated grading and mistake review
-- Learning history and progress feedback
-- AI-assisted learning interactions
-
-[Explore repository →](https://github.com/yjd953/Math-Practice-Mini-Program)
-
-</td>
-<td width="38%" valign="top">
-  <img src="./assets/project-card.png" width="100%" alt="Math Practice Mini Program project card" />
-</td>
-</tr>
-</table>
-
 ## Engineering notes
 
 I use the blog as a public engineering notebook: fewer hot takes, more system diagrams, trade-offs, failure modes, and reusable checklists.
