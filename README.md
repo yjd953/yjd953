@@ -5,7 +5,7 @@
 <br/>
 
 <div align="center">
-  <a href="https://yjd953.github.io/yjd953/"><b>Engineering Notes</b></a>
+  <a href="https://github.com/yjd953/yjd953/blob/main/index.md"><b>Engineering Notes</b></a>
   &nbsp;·&nbsp;
   <a href="https://github.com/yjd953?tab=repositories"><b>Projects</b></a>
   &nbsp;·&nbsp;
@@ -63,9 +63,9 @@ I use the blog as a public engineering notebook: fewer hot takes, more system di
 
 | Note | What it covers |
 |---|---|
-| [From Demo to Production: Four Reliability Pillars for Agents](https://yjd953.github.io/yjd953/posts/agent-reliability.html) | Control loops, state, tools, evaluation, and observability |
-| [A Practical Tool-Use Checklist](https://yjd953.github.io/yjd953/posts/tool-use-checklist.html) | Contracts, permissions, idempotency, retries, and verification |
-| [Open the full notebook](https://yjd953.github.io/yjd953/) | All essays, notes, and future experiments |
+| [From Demo to Production: Four Reliability Pillars for Agents](https://github.com/yjd953/yjd953/blob/main/posts/agent-reliability.md) | Control loops, state, tools, evaluation, and observability |
+| [A Practical Tool-Use Checklist](https://github.com/yjd953/yjd953/blob/main/posts/tool-use-checklist.md) | Contracts, permissions, idempotency, retries, and verification |
+| [Open the full notebook](https://github.com/yjd953/yjd953/blob/main/index.md) | All essays, notes, and future experiments |
 
 ## Current operating system
 
