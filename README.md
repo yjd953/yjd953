@@ -53,9 +53,9 @@ I use the blog as a public engineering notebook: fewer hot takes, more system di
 
 <div align="center">
   <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/yjd953/yjd953/output/github-snake-dark.png" />
-    <source media="(prefers-color-scheme: light)" srcset="https://raw.githubusercontent.com/yjd953/yjd953/output/github-snake.png" />
-    <img alt="GitHub contribution snake" src="https://raw.githubusercontent.com/yjd953/yjd953/output/github-snake.png" width="100%" />
+    <source media="(prefers-color-scheme: dark)" srcset="./assets/github-snake-dark.svg" />
+    <source media="(prefers-color-scheme: light)" srcset="./assets/github-snake.svg" />
+    <img alt="GitHub contribution snake" src="./assets/github-snake.svg" width="100%" />
   </picture>
 </div>
 
