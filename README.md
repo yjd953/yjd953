@@ -1,5 +1,5 @@
 <div align="center">
-  <img src="./assets/hero.svg" width="100%" alt="Dale Yang — Agent Engineer" />
+  <img src="./assets/hero.png" width="100%" alt="Dale Yang — Agent Engineer" />
 </div>
 
 <br/>
@@ -29,7 +29,7 @@ PRINCIPLE Observable by default · Fail safely · Keep humans in control
 ## Agent engineering map
 
 <div align="center">
-  <img src="./assets/agent-map.svg" width="100%" alt="Agent engineering capability map" />
+  <img src="./assets/agent-map.png" width="100%" alt="Agent engineering capability map" />
 </div>
 
 ## Featured build
@@ -52,7 +52,7 @@ A handwriting-first arithmetic practice experience with OCR-based grading, learn
 
 </td>
 <td width="38%" valign="top">
-  <img src="./assets/project-card.svg" width="100%" alt="Math Practice Mini Program project card" />
+  <img src="./assets/project-card.png" width="100%" alt="Math Practice Mini Program project card" />
 </td>
 </tr>
 </table>
@@ -70,16 +70,16 @@ I use the blog as a public engineering notebook: fewer hot takes, more system di
 ## Current operating system
 
 <div align="center">
-  <img src="./assets/now.svg" width="100%" alt="Current focus and working principles" />
+  <img src="./assets/now.png" width="100%" alt="Current focus and working principles" />
 </div>
 
 ## Activity
 
 <div align="center">
   <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/yjd953/yjd953/output/github-snake-dark.svg" />
-    <source media="(prefers-color-scheme: light)" srcset="https://raw.githubusercontent.com/yjd953/yjd953/output/github-snake.svg" />
-    <img alt="GitHub contribution snake" src="https://raw.githubusercontent.com/yjd953/yjd953/output/github-snake.svg" width="100%" />
+    <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/yjd953/yjd953/output/github-snake-dark.png" />
+    <source media="(prefers-color-scheme: light)" srcset="https://raw.githubusercontent.com/yjd953/yjd953/output/github-snake.png" />
+    <img alt="GitHub contribution snake" src="https://raw.githubusercontent.com/yjd953/yjd953/output/github-snake.png" width="100%" />
   </picture>
 </div>
 
