@@ -5,7 +5,7 @@
 <br/>
 
 <div align="center">
-  <a href="https://github.com/yjd953/yjd953/blob/main/index.md"><b>Engineering Notes</b></a>
+  <a href="https://yjd953.github.io/yjd953/"><b>Agent Harness Blog</b></a>
   &nbsp;·&nbsp;
   <a href="https://github.com/yjd953?tab=repositories"><b>Projects</b></a>
   &nbsp;·&nbsp;
@@ -63,9 +63,10 @@ I use the blog as a public engineering notebook: fewer hot takes, more system di
 
 | Note | What it covers |
 |---|---|
-| [From Demo to Production: Four Reliability Pillars for Agents](https://github.com/yjd953/yjd953/blob/main/posts/agent-reliability.md) | Control loops, state, tools, evaluation, and observability |
-| [A Practical Tool-Use Checklist](https://github.com/yjd953/yjd953/blob/main/posts/tool-use-checklist.md) | Contracts, permissions, idempotency, retries, and verification |
-| [Open the full notebook](https://github.com/yjd953/yjd953/blob/main/index.md) | All essays, notes, and future experiments |
+| [Agent Harness：把模型变成可靠执行系统](https://yjd953.github.io/yjd953/#article-runtime) | 六层运行时架构、状态机、控制回路与恢复机制 |
+| [Tool Protocol：让每次调用都像一笔可信交易](https://yjd953.github.io/yjd953/#article-tools) | Schema、权限、幂等、超时、风险分级与事后核验 |
+| [Trace-native Evaluation：从一次得分到持续改进](https://yjd953.github.io/yjd953/#article-eval) | 离线回放、在线信号、轨迹诊断和发布门禁 |
+| [Open the full field notes](https://yjd953.github.io/yjd953/) | Agent Harness 专题博客、系统图解与工程检查表 |
 
 ## Current operating system
 
