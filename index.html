@@ -21,7 +21,7 @@
     <a class="card" data-tags="runtime architecture" href="#article-runtime"><span class="num">NOTE 01 / RUNTIME</span><h3>Agent Harness：把模型变成可靠执行系统</h3><p>拆解 Harness 的六层架构、状态机、控制回路与恢复机制，解释为什么"模型 + Tools"还不是生产级 Agent。</p><div class="tags"><span class="tag">RUNTIME</span><span class="tag">STATE MACHINE</span><span class="tag">RECOVERY</span></div><span class="arrow">READ IN 14 MIN →</span></a>
     <a class="card" data-tags="tools safety" href="#article-tools"><span class="num">NOTE 02 / TOOLING</span><h3>Tool Protocol：让每次调用都像一笔可信交易</h3><p>从 Schema、权限、幂等、超时到事后核验，建立工具调用的事务模型与风险分级。</p><div class="tags"><span class="tag">TOOLS</span><span class="tag">CONTRACT</span><span class="tag">SAFETY</span></div><span class="arrow">READ IN 12 MIN →</span></a>
     <a class="card" data-tags="eval observability" href="#article-eval"><span class="num">NOTE 03 / EVALUATION</span><h3>Trace-native Evaluation：从一次得分到持续改进</h3><p>建立离线回放、在线信号、轨迹诊断和发布门禁，让评测真正进入 Agent 的开发循环。</p><div class="tags"><span class="tag">EVAL</span><span class="tag">TRACING</span><span class="tag">REGRESSION</span></div><span class="arrow">READ IN 13 MIN →</span></a>
-    <a class="card" data-tags="interview backend" href="https://github.com/yjd953/yjd953/blob/main/posts/backend-interview-guide.md" target="_blank" rel="noopener"><span class="num">NOTE 04 / INTERVIEW</span><h3>后端开发八股文指南</h3><p>覆盖 Java、Go、JVM、Redis、MySQL、MQ、网络、分布式九大模块，90 个高频面试知识点，每题含原理、深度追问、代码示例与常见误区。</p><div class="tags"><span class="tag">JAVA</span><span class="tag">GO</span><span class="tag">REDIS</span><span class="tag">JVM</span><span class="tag">MQ</span></div><span class="arrow">OPEN ON GITHUB →</span></a>
+    <a class="card" data-tags="interview backend" href="#article-interview"><span class="num">NOTE 04 / INTERVIEW</span><h3>后端开发八股文指南</h3><p>覆盖 Java、Go、JVM、Redis、MySQL、MQ、网络、分布式九大模块，90 个高频面试知识点，每题含原理、深度追问、代码示例与常见误区。</p><div class="tags"><span class="tag">JAVA</span><span class="tag">GO</span><span class="tag">REDIS</span><span class="tag">JVM</span><span class="tag">MQ</span></div><span class="arrow">READ IN 90 MIN →</span></a>
   </div></section>
   <section class="shell section" id="map"><div class="sectionhead"><h2>The harness<br>control plane</h2><p>模型负责提出下一步，Harness 负责边界、状态、执行、验证和学习。</p></div><div class="map"><svg viewBox="0 0 1040 400" role="img" aria-label="Agent Harness 控制平面架构图"><defs><marker id="arr" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0 0L10 5L0 10z" fill="#36d7d0"/></marker></defs><rect x="20" y="28" width="1000" height="340" rx="4" fill="#091a20" stroke="#1d3941"/><text x="48" y="62" fill="#7f9aa0" font-family="monospace" font-size="12">AGENT HARNESS / CONTROL PLANE</text><g font-family="sans-serif" font-size="15" fill="#e8f1f2"><rect x="58" y="120" width="150" height="92" fill="#10272e" stroke="#2a5962"/><text x="82" y="156">01 · Context</text><text x="82" y="181" fill="#8ea7ac" font-size="12">assemble + budget</text><rect x="262" y="120" width="150" height="92" fill="#10272e" stroke="#2a5962"/><text x="286" y="156">02 · Decide</text><text x="286" y="181" fill="#8ea7ac" font-size="12">model + policy</text><rect x="466" y="120" width="150" height="92" fill="#10272e" stroke="#2a5962"/><text x="490" y="156">03 · Execute</text><text x="490" y="181" fill="#8ea7ac" font-size="12">tools + effects</text><rect x="670" y="120" width="150" height="92" fill="#10272e" stroke="#2a5962"/><text x="694" y="156">04 · Verify</text><text x="694" y="181" fill="#8ea7ac" font-size="12">state + evidence</text><rect x="854" y="120" width="130" height="92" fill="#133229" stroke="#4e7b51"/><text x="878" y="156">05 · Learn</text><text x="878" y="181" fill="#a9c7ad" font-size="12">trace + eval</text></g><g stroke="#36d7d0" stroke-width="2" marker-end="url(#arr)"><path d="M208 166H254"/><path d="M412 166H458"/><path d="M616 166H662"/><path d="M820 166H846"/><path d="M919 220V285H338V220" fill="none"/></g><g font-family="monospace" font-size="11" fill="#f4c46b"><text x="60" y="286">POLICY GATES</text><text x="218" y="286">STATE STORE</text><text x="388" y="286">PERMISSION MODEL</text><text x="590" y="286">OBSERVABILITY</text><text x="770" y="286">HUMAN CHECKPOINTS</text></g><path d="M58 304H984" stroke="#29454c" stroke-dasharray="5 5"/><text x="58" y="333" fill="#78949a" font-family="monospace" font-size="12">Every transition is bounded · every effect is attributable · every outcome is verifiable</text></svg></div></section>
   <section class="shell section"><div class="sectionhead"><h2>Operating<br>principles</h2></div><div class="principles"><div class="principle"><b>P01 / BOUNDARIES</b><h3>模型不是权限主体</h3><p>模型提出意图，Harness 根据策略、身份、风险和当前状态决定能否执行。</p></div><div class="principle"><b>P02 / STATE</b><h3>显式状态优于隐式上下文</h3><p>任务、假设、证据、待确认动作都应结构化，让恢复与回放成为工程能力。</p></div><div class="principle"><b>P03 / EFFECTS</b><h3>外部动作必须事后核验</h3><p>"调用成功"不等于目标状态成立；从权威来源读取最终状态，才能闭环。</p></div><div class="principle"><b>P04 / LEARNING</b><h3>生产轨迹就是下一版评测集</h3><p>把失败轨迹聚类、最小化并固化为回归用例，系统才能持续变得更可靠。</p></div></div></section>
@@ -84,19 +84,917 @@ Operational:         延迟、成本、恢复、稳定性是否可接受</code><
 <h2 id="e5">5. 发布门禁</h2><p>Agent 发布不能只比较一个总分。建议按风险维度设置门禁：</p><ul class="checklist"><li>关键任务成功率不得回退；</li><li>高风险工具误调用必须为零或进入人工检查点；</li><li>参数正确率、引用完整率达到场景阈值；</li><li>重复副作用、无限循环、未核验成功为零容忍项；</li><li>P95 延迟与单任务成本不超过预算；</li><li>新增失败模式必须有解释、回滚与监控方案。</li></ul><div class="callout"><strong>评测的最终目标不是证明新版本更聪明，而是证明它在目标场景下更值得信任。</strong></div><p><strong>结论：</strong>当 Trace、Evaluation 和 Release Gate 连接起来，Agent 工程才从"调 Prompt"升级为可持续的软件交付体系。</p>
 </article>
 
-<div class="cmd" id="cmd"><div class="cmdpanel"><input id="cmdInput" placeholder="搜索文章或跳转…" aria-label="搜索"><div class="cmdlist" id="cmdList"><a href="#article-runtime">Runtime architecture — Agent Harness</a><a href="#article-tools">Tool Protocol — 可信工具交易</a><a href="#article-eval">Trace-native Evaluation — 评测闭环</a><a href="https://github.com/yjd953/yjd953/blob/main/posts/backend-interview-guide.md" target="_blank">后端八股文指南 — 90 个面试知识点</a><a href="#map">System map — 控制平面</a><a href="https://github.com/yjd953">GitHub profile</a></div></div></div>
-<script>
-(function(){
-  'use strict';
-  var views={home:document.getElementById('homeView'),runtime:document.getElementById('runtimeView'),tools:document.getElementById('toolsView'),eval:document.getElementById('evalView')};
-  function route(){var h=location.hash||'#home',key=h.indexOf('#article-runtime')===0?'runtime':h.indexOf('#article-tools')===0?'tools':h.indexOf('#article-eval')===0?'eval':'home';Object.keys(views).forEach(function(k){views[k].hidden=k!==key;});window.scrollTo(0,0);document.title=key==='home'?'Dale Yang — Agent Harness Field Notes':views[key].querySelector('h1').textContent+' — Dale Yang';}
-  window.addEventListener('hashchange',route);route();
-  var progress=document.getElementById('progress');window.addEventListener('scroll',function(){var d=document.documentElement;var max=d.scrollHeight-d.clientHeight;progress.style.width=(max>0?(d.scrollTop/max)*100:0)+'%';},{passive:true});
-  document.getElementById('themeBtn').addEventListener('click',function(){document.body.classList.toggle('light');localStorage.setItem('dy-theme',document.body.classList.contains('light')?'light':'dark');});if(localStorage.getItem('dy-theme')==='light')document.body.classList.add('light');
-  var cmd=document.getElementById('cmd'),input=document.getElementById('cmdInput');function openCmd(){cmd.classList.add('open');input.value='';filterCmd('');input.focus();}function closeCmd(){cmd.classList.remove('open');}document.getElementById('searchBtn').addEventListener('click',openCmd);cmd.addEventListener('click',function(e){if(e.target===cmd)closeCmd();});document.addEventListener('keydown',function(e){if((e.metaKey||e.ctrlKey)&&e.key.toLowerCase()==='k'){e.preventDefault();openCmd();}if(e.key==='Escape')closeCmd();});
-  function filterCmd(q){Array.prototype.forEach.call(document.querySelectorAll('#cmdList a'),function(a){a.style.display=a.textContent.toLowerCase().indexOf(q.toLowerCase())>-1?'block':'none';});}input.addEventListener('input',function(){filterCmd(input.value);});document.getElementById('cmdList').addEventListener('click',closeCmd);
-  Array.prototype.forEach.call(document.querySelectorAll('.filter'),function(btn){btn.addEventListener('click',function(){document.querySelector('.filter.active').classList.remove('active');btn.classList.add('active');var f=btn.getAttribute('data-filter');Array.prototype.forEach.call(document.querySelectorAll('.card'),function(c){c.style.display=f==='all'||c.getAttribute('data-tags').indexOf(f)>-1?'flex':'none';});});});
-})();
-</script>
-</body>
-</html>
+<article class="article" id="interviewView" hidden>
+<a class="back" href="#home">← BACK TO FIELD NOTES</a><h1>后端开发八股文指南</h1><div class="meta">NOTE 04 · BACKEND INTERVIEW · 9 MODULES · 90 TOPICS · 2026</div>
+<p class="lede">面向后端开发岗位招聘面试的系统知识点梳理，覆盖 Java 基础、JVM、并发多线程、Go 基础、Redis、MySQL、消息队列、计算机网络、分布式系统九大核心模块。每个知识点包含面试问题、原理解答、深度追问、代码示例、常见误区与版本说明。</p>
+<div class="toc"><b>IN THIS GUIDE</b><a href="#一java-基础">一、Java 基础</a><a href="#二jvm">二、JVM</a><a href="#三并发与多线程">三、并发与多线程</a><a href="#四go-基础">四、Go 基础</a><a href="#五redis">五、Redis</a><a href="#六mysql">六、MySQL</a><a href="#七消息队列-mq">七、消息队列 MQ</a><a href="#八计算机网络">八、计算机网络</a><a href="#九分布式系统">九、分布式系统</a></div>
+<h2 id="一java-基础">一、Java 基础</h2>
+<h3>1. HashMap 底层原理</h3>
+<p><strong>Q：请讲讲 HashMap 的底层实现，1.7 和 1.8 有什么区别？扩容过程是怎样的？为什么会出现 1.7 并发扩容死循环？</strong></p>
+<p><strong>解答：</strong></p>
+<p>HashMap 是 Java 中最常用的 Map 实现，其底层是<strong>数组 + 链表</strong>（Java 1.7），Java 1.8 起演进为<strong>数组 + 链表 + 红黑树</strong>。</p>
+<p><strong>数据结构：</strong></p>
+<ul>
+<li><strong>table 数组</strong>：类型为 <code>Node&lt;K,V&gt;[]</code>，初始容量默认为 16（必须是 2 的幂）。每个位置称为"桶（bucket）"。</li>
+<li><strong>链表</strong>：当多个 key 哈希到同一个桶（hash 碰撞）时，以链表形式挂在桶上。</li>
+<li><strong>红黑树</strong>：Java 1.8 引入。当链表长度 ≥ 8 且数组长度 ≥ 64 时，链表转红黑树；当树节点数 ≤ 6 时退化为链表。树化是为了把最坏查询复杂度从 O(n) 降到 O(log n)。</li>
+</ul>
+<p><strong>put 流程（1.8）：</strong></p>
+<ol>
+<li>对 key 的 <code>hashCode()</code> 做高 16 位异或低 16 位的扰动（<code>(h = key.hashCode()) ^ (h &gt;&gt;&gt; 16)</code>），让高位也参与路由，减少碰撞。</li>
+<li>用 <code>(n - 1) &amp; hash</code> 定位桶下标（容量是 2 的幂，等价于取模但更快）。</li>
+<li>桶为空直接插入；否则遍历链表/树，key 相等则覆盖 value，否则尾插新节点。</li>
+<li>插入后 <code>++size &gt; threshold</code> 触发扩容，容量翻倍。</li>
+</ol>
+<p><strong>扩容机制：</strong></p>
+<ul>
+<li>阈值 <code>threshold = capacity * loadFactor</code>（默认 0.75）。</li>
+<li>扩容时容量翻倍（<code>newCap = oldCap &lt;&lt; 1</code>），由于容量始终是 2 的幂，元素要么留在原下标，要么移动到 <code>原下标 + 旧容量</code> 的位置——只需判断 hash 新增的那一位是 0 还是 1，无需重新计算完整 hash。</li>
+</ul>
+<p><strong>1.7 vs 1.8 关键区别：</strong></p>
+<table>
+<thead>
+<tr>
+<th>维度</th>
+<th>1.7</th>
+<th>1.8</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>结构</td>
+<td>数组 + 链表</td>
+<td>数组 + 链表 + 红黑树</td>
+</tr>
+<tr>
+<td>插入方式</td>
+<td>头插法</td>
+<td>尾插法</td>
+</tr>
+<tr>
+<td>扩容重哈希</td>
+<td>重新计算 index</td>
+<td>位运算快速定位</td>
+</tr>
+<tr>
+<td>死循环</td>
+<td>并发扩容会成环</td>
+<td>不会成环（仍非线程安全）</td>
+</tr>
+</tbody>
+</table>
+<p><strong>1.7 并发扩容死循环：</strong></p>
+<p>1.7 使用头插法，多线程同时 transfer 时，链表的指针会被反复翻转。假设两个线程同时扩容，线程 A 在 <code>e.next = newTab[i]</code> 处被挂起，线程 B 完成迁移后链表已反转，A 恢复后继续按反转后的链表重排，两个节点互相指向，形成环形链表。此后 get 命中该桶就会 CPU 100%。</p>
+<p><strong>追问：</strong>
+- 追问1：为什么负载因子是 0.75？ → 0.75 是空间成本和查询成本的折中。过小（如 0.5）空间浪费、扩容频繁；过大（如 1.0）碰撞增多、链表变长。0.75 泊松分布下桶命中概率约 0.5，树化阈值 8 在概率上几乎不会触发。
+- 追问2：为什么树化要求链表长度 ≥ 8 而不是 6？ → 理想随机 hash 下，桶内节点数遵循泊松分布，长度达到 8 的概率约为千万分之六。如果 hash 分布良好，红黑树几乎不会用到；否则说明 hash 函数有问题，树化也只是兜底。退化阈值设为 6 是为了避免在 7 附近反复树化/退化抖动。
+- 追问3：HashMap 为什么容量必须是 2 的幂？ → 这样 <code>(n-1) &amp; hash</code> 等价于 <code>hash % n</code>，且扩容时元素新位置可通过一位 bit 判断。如果不是 2 的幂，取模运算慢且扩容定位逻辑复杂。</p>
+<p><strong>代码示例：</strong></p>
+<pre><code class="language-java">// JDK 1.8 HashMap 关键扰动函数
+static final int hash(Object key) {
+    int h;
+    return (key == null) ? 0 : (h = key.hashCode()) ^ (h &gt;&gt;&gt; 16);
+}
+
+// 桶下标计算：n 必须是 2 的幂
+int index = (n - 1) &amp; hash;
+
+// 扩容时元素新位置判断
+if ((oldCapMantissaBit &amp; hash) == 0) {
+    // 留在原下标
+} else {
+    // 移动到 原下标 + oldCap
+}
+</code></pre>
+<p><strong>常见误区：</strong>
+- 误以为 1.8 的 HashMap 是线程安全的——只是没有了死循环，并发下仍可能丢数据（两个线程同时 put 到空桶互相覆盖）。线程安全请用 <code>ConcurrentHashMap</code>。
+- 以为链表长度到 8 立刻树化——还要求数组长度 ≥ 64，否则优先扩容。
+- 以为 HashMap 允许 null key/null value——允许，但只能有一个 null key。</p>
+<p><strong>版本说明：</strong> 以上为 Java 8 及之后的实现。Java 7 及之前无红黑树、头插法、存在并发死循环。</p>
+<hr />
+<h3>2. ArrayList vs LinkedList</h3>
+<p><strong>Q：ArrayList 和 LinkedList 的底层实现有什么区别？如何选择？</strong></p>
+<p><strong>解答：</strong></p>
+<p><strong>ArrayList</strong> 底层是<strong>动态数组</strong>（<code>transient Object[] elementData</code>），支持随机访问。默认初始容量 10（首次 add 时才扩容为 10，注意是懒初始化），扩容时增长 1.5 倍（<code>oldCap + oldCap &gt;&gt; 1</code>）。</p>
+<p><strong>LinkedList</strong> 底层是<strong>双向链表</strong>（每个节点 <code>Node&lt;E&gt;</code> 包含 <code>prev</code>、<code>item</code>、<code>next</code>），同时实现了 <code>List</code> 和 <code>Deque</code> 接口，可以当队列/栈用。</p>
+<p><strong>复杂度对比：</strong></p>
+<table>
+<thead>
+<tr>
+<th>操作</th>
+<th>ArrayList</th>
+<th>LinkedList</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>get(i)</td>
+<td>O(1)</td>
+<td>O(n)（需从头/尾遍历）</td>
+</tr>
+<tr>
+<td>add 末尾</td>
+<td>均摊 O(1)（扩容时 O(n)）</td>
+<td>O(1)</td>
+</tr>
+<tr>
+<td>add 中间</td>
+<td>O(n)（数组搬移）</td>
+<td>O(1)（找到位置后）</td>
+</tr>
+<tr>
+<td>remove(i)</td>
+<td>O(n)（搬移）</td>
+<td>O(n) 查找 + O(1) 删除</td>
+</tr>
+<tr>
+<td>内存</td>
+<td>连续数组，有预留空间</td>
+<td>每节点额外 prev/next 指针开销</td>
+</tr>
+</tbody>
+</table>
+<p><strong>选择依据：</strong></p>
+<ul>
+<li>以<strong>随机访问、遍历</strong>为主 → ArrayList。CPU 缓存局部性好，数组连续内存命中率高。</li>
+<li>在<strong>头尾频繁增删</strong> → 两者都行，但 ArrayDeque 比 LinkedList 更适合做队列。</li>
+<li>在<strong>中间频繁增删</strong>且能拿到迭代器 → LinkedList 理论上有优势，但实际中 LinkedList 的节点非连续、缓存不友好，且"拿到迭代器"本身就是 O(n) 查找，工程中 ArrayList 配合 <code>Arrays.copyOf</code> 往往更快。</li>
+</ul>
+<p><strong>追问：</strong>
+- 追问1：ArrayList 扩容具体怎么实现？ → <code>Arrays.copyOf(elementData, newCapacity)</code> 把旧数组复制到新数组。由于数组是连续内存，这一步是整块拷贝。
+- 追问2：ArrayList 为什么用 transient 修饰 elementData？ → 因为数组可能有大量预留空位，直接序列化浪费空间。ArrayList 自己实现了 <code>writeObject</code>/<code>readObject</code>，只序列化实际有元素的部分。
+- 追问3：LinkedList 真的比 ArrayList 插入快吗？ → 不一定。在中间插入 LinkedList 要先 O(n) 找到位置，再 O(1) 修改指针；ArrayList 是 O(n) 搬移。但 ArrayList 的搬移是 <code>System.arraycopy</code>（native，连续内存），而 LinkedList 的遍历是节点指针跳跃，缓存未命中严重。实际 benchmark 中 ArrayList 经常更快。</p>
+<p><strong>代码示例：</strong></p>
+<pre><code class="language-java">// ArrayList 扩容核心
+private void grow(int minCapacity) {
+    int oldCap = elementData.length;
+    int newCap = oldCap + (oldCap &gt;&gt; 1); // 1.5 倍
+    elementData = Arrays.copyOf(elementData, newCap);
+}
+
+// LinkedList 节点
+private static class Node&lt;E&gt; {
+    E item;
+    Node&lt;E&gt; next;
+    Node&lt;E&gt; prev;
+}
+</code></pre>
+<p><strong>常见误区：</strong>
+- 以为 LinkedList 插入删除总是 O(1)——那是在已经拿到目标节点引用时；通过 index 定位仍是 O(n)。
+- 以为 ArrayList 随机访问快是因为"数组"——本质是连续内存 + O(1) 寻址 + CPU 缓存预取。</p>
+<p><strong>版本说明：</strong> Java 6+ 行为一致。Java 7 开始 ArrayList 改为懒初始化（首次 add 才分配数组）。</p>
+<hr />
+<h3>3. String 不可变性</h3>
+<p><strong>Q：String 为什么不可变？什么是字符串常量池？intern() 方法的作用是什么？StringBuilder 和 StringBuffer 区别？</strong></p>
+<p><strong>解答：</strong></p>
+<p><strong>不可变性的含义：</strong> String 对象一旦创建，其内容（字符数组 value）不能被修改。Java 9 之前底层是 <code>char[]</code>，Java 9 起改为 <code>byte[]</code> + 编码标志（Compact Strings）。所有"修改"String 的操作（substring、concat、replace）都返回新对象。</p>
+<p><strong>为什么设计为不可变：</strong></p>
+<ol>
+<li><strong>安全</strong>：作为参数传递时不用担心被篡改。例如类加载器中以 String 作为类名，如果可变可能被替换。</li>
+<li><strong>线程安全</strong>：不可变对象天然线程安全，可自由共享。</li>
+<li><strong>hashCode 缓存</strong>：String 作为 HashMap key 时 hashCode 可以缓存，避免每次重算。</li>
+<li><strong>常量池共享</strong>：不可变才能安全地把字面量放入常量池复用。</li>
+</ol>
+<p><strong>字符串常量池（String Pool）：</strong></p>
+<ul>
+<li>位置：Java 7 之前在方法区（永久代），Java 7 移到堆中，Java 8 随永久代移除仍在堆中。</li>
+<li>字面量 <code>String s = "abc"</code> 会先查常量池，存在则直接引用，不存在则创建并放入。</li>
+<li><code>new String("abc")</code> 会创建两个对象：常量池中的 "abc"（如果不存在）和堆中的新 String 对象。</li>
+</ul>
+<p><strong>intern()：</strong></p>
+<ul>
+<li><code>s.intern()</code> 会去常量池查找是否有 equal 的字符串，有则返回池中的引用；没有则把当前 String 的引用放入池并返回。</li>
+<li>Java 7+ 后，intern 若池中没有，存的是堆中该 String 的引用（不再复制一份到永久代），节省空间。</li>
+</ul>
+<p><strong>StringBuilder vs StringBuffer：</strong></p>
+<ul>
+<li>StringBuilder 非线程安全，方法无 synchronized，性能更好，是单线程拼接的首选。</li>
+<li>StringBuffer 方法加了 synchronized，线程安全但性能差。</li>
+<li>循环中用 <code>+</code> 拼接字符串，编译器会优化为 StringBuilder append，但每次循环都 new 一个 StringBuilder，反而慢，应手动用一个 StringBuilder。</li>
+</ul>
+<p><strong>追问：</strong>
+- 追问1：String s = new String("abc") 创建了几个对象？ → 若常量池没有 "abc"，创建 2 个（池中的 "abc" + 堆中的 String 实例）；若已有，只创建 1 个堆对象。
+- 追问2：String s1 = new String("1"); s1.intern(); String s2 = "1"; s1 == s2? → Java 6 中 false（intern 复制到永久代），Java 7+ 中 true（intern 记录堆引用）。
+- 追问3：String 为什么是 final 的？ → 防止子类破坏不可变性。如果可继承，子类可以覆盖方法让自己可变。</p>
+<p><strong>代码示例：</strong></p>
+<pre><code class="language-java">String a = &quot;hi&quot;;
+String b = &quot;hi&quot;;
+System.out.println(a == b); // true，常量池复用
+
+String c = new String(&quot;hi&quot;);
+System.out.println(a == c); // false
+
+String d = c.intern();
+System.out.println(a == d); // true（Java 7+）
+
+// 错误示范：循环中用 +
+String s = &quot;&quot;;
+for (int i = 0; i &lt; 1000; i++) {
+    s += i; // 每次 new StringBuilder，性能差
+}
+// 正确：
+StringBuilder sb = new StringBuilder();
+for (int i = 0; i &lt; 1000; i++) sb.append(i);
+</code></pre>
+<p><strong>常见误区：</strong>
+- 以为 <code>String s = "a" + "b"</code> 会创建多个对象——编译器常量折叠，等价于 "ab"。
+- 以为 intern 总是把字符串复制到常量池——Java 7+ 存的是堆引用。
+- 以为 String 不可变是因为 value 是 final——value 是 final 引用，但 char[] 内容本身可变，只是 String 没暴露任何修改方法且类是 final。</p>
+<p><strong>版本说明：</strong> Java 7 字符串常量池移到堆；Java 9 Compact Strings（byte[] 替代 char[]）。</p>
+<hr />
+<h3>4. 接口 vs 抽象类</h3>
+<p><strong>Q：接口和抽象类有什么区别？Java 8 之后接口有什么变化？如何选择？</strong></p>
+<p><strong>解答：</strong></p>
+<p><strong>抽象类：</strong></p>
+<ul>
+<li>用 <code>abstract class</code> 修饰，不能实例化。</li>
+<li>可以有构造器、成员变量、普通方法、抽象方法、静态方法、final 方法。</li>
+<li>一个类只能继承一个抽象类（单继承）。</li>
+<li>体现"is-a"关系，是模板。</li>
+</ul>
+<p><strong>接口：</strong></p>
+<ul>
+<li>用 <code>interface</code> 修饰，Java 8 之前只能有 public 抽象方法和 public static final 常量。</li>
+<li>一个类可以实现多个接口。</li>
+<li>体现"can-do"能力，是契约。</li>
+</ul>
+<p><strong>Java 8 接口变化：</strong></p>
+<ol>
+<li><strong>默认方法（default method）</strong>：接口可以有带默认实现的方法，解决接口演进问题（如 Collection 新增 stream() 不用破坏所有实现类）。</li>
+<li><strong>静态方法</strong>：接口里可以有静态方法。</li>
+<li><strong>私有方法</strong>（Java 9+）：接口里可以有 private 方法，供 default 方法复用。</li>
+</ol>
+<p><strong>设计取舍：</strong></p>
+<ul>
+<li>需要<strong>代码复用、有状态、有构造器、有非公共方法</strong> → 抽象类。</li>
+<li>定义<strong>能力契约、跨类型层次、多实现</strong> → 接口。</li>
+<li>接口多继承时如果多个父接口有同名 default 方法，实现类必须重写该方法，否则编译报错。</li>
+</ul>
+<p><strong>追问：</strong>
+- 追问1：抽象类能有构造器吗？ → 能，供子类 super() 调用，不能自己 new。
+- 追问2：接口能继承接口吗？ → 能，<code>interface A extends B, C</code> 多继承。
+- 追问3：default 方法解决什么历史问题？ → Java 8 给 Collection 加了 stream()、forEach()，如果这些是抽象方法，所有历史 Collection 实现类都要改。default 方法提供二进制兼容。</p>
+<p><strong>代码示例：</strong></p>
+<pre><code class="language-java">interface Flyable {
+    void fly();
+    default void glide() { System.out.println(&quot;滑翔&quot;); }
+    static Flyable create() { return new Bird(); }
+}
+
+abstract class Animal {
+    private String name;
+    public Animal(String name) { this.name = name; }
+    abstract void eat();
+}
+
+class Bird extends Animal implements Flyable {
+    public Bird() { super(&quot;鸟&quot;); }
+    public void fly() { System.out.println(&quot;飞&quot;); }
+}
+</code></pre>
+<p><strong>常见误区：</strong>
+- 以为 Java 8 后接口和抽象类没区别了——接口仍不能有实例变量、构造器、非 public 方法（Java 9 前）。
+- 以为默认方法破坏了接口抽象——它是为了接口演进，不是为了多继承状态。</p>
+<p><strong>版本说明：</strong> default/static 方法自 Java 8 起；private 接口方法自 Java 9 起。</p>
+<hr />
+<h3>5. 异常体系</h3>
+<p><strong>Q：Java 异常体系是怎样的？受检异常和非受检异常区别？try-with-resources 解决什么问题？什么是异常丢失？</strong></p>
+<p><strong>解答：</strong></p>
+<p><strong>异常体系：</strong></p>
+<pre><code>Throwable
+ ├── Error（不捕获，如 OOM、StackOverflowError）
+ └── Exception
+      ├── RuntimeException（非受检异常）
+      │    ├── NullPointerException
+      │    ├── IllegalArgumentException
+      │    ├── IndexOutOfBoundsException
+      │    └── ConcurrentModificationException
+      └── 其他 Exception 子类（受检异常，如 IOException、SQLException）
+</code></pre>
+<p><strong>受检异常（Checked Exception）：</strong> 编译期检查，必须 throws 或 try-catch。代表"可恢复的、外部条件导致的"问题。
+<strong>非受检异常（Unchecked Exception）：</strong> RuntimeException 及其子类 + Error，编译期不强制处理。代表"程序 bug、不可恢复"。</p>
+<p><strong>try-with-resources（Java 7+）：</strong></p>
+<ul>
+<li>凡是实现了 <code>AutoCloseable</code>（或 <code>Closeable</code>）的资源，都可以写在 try 后的括号里，自动关闭。</li>
+<li>编译器自动生成 finally 关闭逻辑，且关闭顺序与声明顺序相反。</li>
+<li>比手写 finally 更安全：手写时如果 try 和 finally 都抛异常，finally 的异常会覆盖 try 的异常。</li>
+</ul>
+<p><strong>异常丢失（Suppressed Exceptions）：</strong></p>
+<ul>
+<li>try-with-resources 中，如果 try 块抛异常 A，关闭资源时又抛异常 B，B 会被"抑制"，通过 <code>A.addSuppressed(B)</code> 记录，调用 <code>getSuppressed()</code> 可获取。</li>
+<li>传统 finally 写法中，finally 的异常会直接覆盖 try 的异常，原始异常丢失。</li>
+</ul>
+<p><strong>追问：</strong>
+- 追问1：Error 要不要捕获？ → 一般不捕获。OOM、StackOverflow 等 JVM 级错误通常无法恢复，捕获了也做不了什么。
+- 追问2：自定义异常应该继承 Exception 还是 RuntimeException？ → 库作者倾向于用受检异常强制调用方处理；现代实践（如 Spring）倾向于非受检异常，避免强制 throws 污染代码。
+- 追问3：finally 一定会执行吗？ → 不一定。<code>System.exit(0)</code>、JVM crash、守护线程被杀等场景不会执行。</p>
+<p><strong>代码示例：</strong></p>
+<pre><code class="language-java">// 传统写法：异常可能丢失
+try {
+    InputStream in = new FileInputStream(&quot;a.txt&quot;);
+    try {
+        // read
+    } finally {
+        in.close(); // 如果这里抛异常，try 里的异常被覆盖
+    }
+} catch (IOException e) { ... }
+
+// try-with-resources：自动关闭，异常保留 + suppressed
+try (InputStream in = new FileInputStream(&quot;a.txt&quot;);
+     OutputStream out = new FileOutputStream(&quot;b.txt&quot;)) {
+    // read/write
+} catch (IOException e) {
+    e.getSuppressed(); // 可获取关闭时的附加异常
+}
+</code></pre>
+<p><strong>常见误区：</strong>
+- 以为 finally 一定执行——System.exit 等场景不执行。
+- 以为 catch (Exception e) 能捕获 Throwable——不能捕获 Error。
+- 以为 try-with-resources 是语法糖无开销——实际是编译器改写为 try-finally 并记录 suppressed。</p>
+<p><strong>版本说明：</strong> try-with-resources 自 Java 7；effectively final 资源变量自 Java 9。</p>
+<hr />
+<h3>6. 泛型与类型擦除</h3>
+<p><strong>Q：Java 泛型是怎么实现的？什么是类型擦除？什么是桥接方法？PECS 原则是什么？</strong></p>
+<p><strong>解答：</strong></p>
+<p><strong>类型擦除（Type Erasure）：</strong> Java 泛型是<strong>编译期</strong>特性，编译后泛型信息被擦除。<code>List&lt;String&gt;</code> 和 <code>List&lt;Integer&gt;</code> 在运行时是同一个类 <code>List</code>。编译器在编译期做类型检查，然后把泛型参数替换为擦除类型（无界擦除为 Object，有界擦除为上界），并在存取时插入强制类型转换。</p>
+<p><strong>为什么这样设计：</strong> 为了兼容 Java 5 之前的非泛型代码（原生类型 raw type），实现"泛型化前后的代码可以互操作"。这是一种妥协，代价是运行时无法获取泛型参数。</p>
+<p><strong>桥接方法（Bridge Method）：</strong> 当泛型类或接口被继承/实现时，编译器生成桥接方法保证多态行为。</p>
+<p>例如：</p>
+<pre><code class="language-java">interface Comparable&lt;T&gt; { int compareTo(T o); }
+class Date implements Comparable&lt;Date&gt; {
+    public int compareTo(Date o) { ... }
+}
+</code></pre>
+<p>擦除后 Comparable.compareTo 的签名是 <code>compareTo(Object)</code>。Date 实际写的是 <code>compareTo(Date)</code>，这不是 override。编译器生成桥接方法 <code>compareTo(Object o)</code>，内部转型后调用 <code>compareTo(Date)</code>，保证多态。</p>
+<p><strong>泛型数组问题：</strong> 不能 <code>new T[10]</code>，因为擦除后变成 <code>Object[10]</code>，写入其他类型元素不会在运行时检查。<code>List&lt;String&gt;[]</code> 非法，但 <code>?</code> 通配符数组可以。</p>
+<p><strong>PECS 原则（Producer Extends, Consumer Super）：</strong></p>
+<ul>
+<li><code>? extends T</code>：上界通配符，用于<strong>读取</strong>（生产者）。可以取出 T 或子类，但不能写入（除了 null）。</li>
+<li><code>? super T</code>：下界通配符，用于<strong>写入</strong>（消费者）。可以写入 T 或子类，但读取时只能当 Object。</li>
+<li>记忆：<strong>写入用 super，读取用 extends</strong>。</li>
+</ul>
+<p><strong>追问：</strong>
+- 追问1：为什么不能 <code>new T()</code>？ → 运行时 T 被擦除为 Object，无法知道实际类型。需要传入 <code>Class&lt;T&gt;</code> 或 Supplier。
+- 追问2：泛型能基本类型作参数吗？ → 不能，必须是引用类型，用 <code>List&lt;Integer&gt;</code> 不能 <code>List&lt;int&gt;</code>。
+- 追问3：<code>List&lt;String&gt;</code> 能赋值给 <code>List&lt;Object&gt;</code> 吗？ → 不能，虽然 String 是 Object 子类，但泛型不型变。要型变用 <code>List&lt;? extends Object&gt;</code>。</p>
+<p><strong>代码示例：</strong></p>
+<pre><code class="language-java">// PECS 示例
+public static &lt;T&gt; void copy(List&lt;? extends T&gt; src, List&lt;? super T&gt; dest) {
+    for (T t : src) dest.add(t); // src 是生产者，dest 是消费者
+}
+
+// 桥接方法验证
+public class StringBox implements Box&lt;String&gt; {
+    public void set(String s) { ... }
+    // 编译器生成桥接：
+    // public void set(Object o) { set((String) o); }
+}
+interface Box&lt;T&gt; { void set(T t); }
+</code></pre>
+<p><strong>常见误区：</strong>
+- 以为泛型是运行时机制——运行时只剩原始类型。
+- 以为 <code>instanceof List&lt;String&gt;</code> 能检查——只能 <code>instanceof List&lt;?&gt;</code>。
+- 违背 PECS 写出 <code>List&lt;?&gt;</code> 通配符滥用代码。</p>
+<p><strong>版本说明：</strong> Java 5 引入泛型。Java 7 diamond 语法 <code>&lt;&gt;</code>；Java 8 方法引用/lambda 与泛型配合。</p>
+<hr />
+<h3>7. 注解与反射</h3>
+<p><strong>Q：注解的生命周期有哪几种？反射如何获取泛型信息？反射性能开销有多大？</strong></p>
+<p><strong>解答：</strong></p>
+<p><strong>注解生命周期（RetentionPolicy）：</strong></p>
+<ul>
+<li><code>SOURCE</code>：只在源码保留，编译期丢弃，如 <code>@Override</code>、<code>@SuppressWarnings</code>。</li>
+<li><code>CLASS</code>：编译到 class 文件，运行时不加载，是默认值。</li>
+<li><code>RUNTIME</code>：运行时保留，可被反射读取，如 <code>@Retention(RUNTIME)</code> + <code>@Target</code>。</li>
+</ul>
+<p><strong>元注解：</strong> <code>@Target</code>（作用目标）、<code>@Retention</code>（生命周期）、<code>@Documented</code>、<code>@Inherited</code>、<code>@Repeatable</code>。</p>
+<p><strong>反射获取泛型：</strong> 由于类型擦除，<code>field.getType()</code> 只能拿到原始类型。要获取泛型参数，用 <code>field.getGenericType()</code>，返回 <code>ParameterizedType</code>，再调用 <code>getActualTypeArguments()</code>。</p>
+<p><strong>反射性能：</strong></p>
+<ul>
+<li>反射比直接调用慢，因为要做安全检查、方法查找、参数装箱。</li>
+<li>JDK 17+ 对反射有更强封装（强封装 JDK 内部 API），<code>--add-opens</code> 才能深度反射。</li>
+<li>优化：缓存 Method/Field 对象；<code>setAccessible(true)</code> 跳过安全检查；MethodHandle/LambdaMetafactory 比传统反射快。</li>
+</ul>
+<p><strong>追问：</strong>
+- 追问1：注解能继承吗？ → 默认不能，但 <code>@Inherited</code> 元注解标注的注解会被子类继承（仅对类继承有效，接口实现不算）。
+- 追问2：反射能访问 private 字段吗？ → 能，<code>field.setAccessible(true)</code>。但 Java 9 模块系统会限制跨模块深度反射。
+- 追问3：自定义注解要运行时可读，必须配什么？ → <code>@Retention(RetentionPolicy.RUNTIME)</code>，否则反射拿不到。</p>
+<p><strong>代码示例：</strong></p>
+<pre><code class="language-java">// 自定义运行时注解
+@Retention(RetentionPolicy.RUNTIME)
+@Target(ElementType.FIELD)
+@interface Config { String value(); }
+
+class App {
+    @Config(&quot;timeout.ms&quot;)
+    private int timeout;
+}
+
+// 反射读取注解 + 泛型
+Field f = App.class.getDeclaredField(&quot;timeout&quot;);
+Config c = f.getAnnotation(Config.class);
+System.out.println(c.value()); // timeout.ms
+
+// 获取泛型参数
+List&lt;String&gt; list = new ArrayList&lt;&gt;();
+Field f2 = ...; // 假设拿到 List&lt;String&gt; 字段
+ParameterizedType pt = (ParameterizedType) f2.getGenericType();
+Type[] args = pt.getActualTypeArguments(); // [String.class]
+</code></pre>
+<p><strong>常见误区：</strong>
+- 以为注解默认 RUNTIME——默认是 CLASS。
+- 以为 <code>getGenericType</code> 一定是 ParameterizedType——可能是 TypeVariable 或 WildcardType，需要 instanceof 判断。
+- 忽略反射的安全开销，在热点路径大量反射。</p>
+<p><strong>版本说明：</strong> Java 5 注解；Java 8 重复注解；Java 9 模块系统强封装。</p>
+<hr />
+<h3>8. Java 8+ 新特性</h3>
+<p><strong>Q：Java 8 有哪些重要新特性？Lambda、Stream、Optional、CompletableFuture 各解决什么问题？</strong></p>
+<p><strong>解答：</strong></p>
+<p><strong>Lambda 表达式：</strong> 本质是函数式接口的实例（只有一个抽象方法的接口）。Lambda 让代码更简洁，支持行为参数化。</p>
+<p><strong>Stream API：</strong> 对集合做声明式处理。分为中间操作（filter、map、sorted，惰性求值）和终端操作（collect、forEach、count，触发计算）。注意 Stream 只能消费一次，关闭后再用会抛 <code>IllegalStateException</code>。</p>
+<p><strong>Optional：</strong> 容器对象，用于显式表达"可能为空"，避免 NPE。<code>ofNullable</code>、<code>orElse</code>、<code>orElseGet</code>、<code>map</code>、<code>ifPresent</code>。不要把 Optional 当字段或方法参数（设计意图是返回值）。</p>
+<p><strong>CompletableFuture：</strong> 异步编程的核心类，支持链式组合（thenApply、thenCompose、thenCombine）、异常处理（exceptionally）、等待多个任务（allOf、anyOf）。比 Future 强大在可以回调式编排。</p>
+<p><strong>其他：</strong> 接口默认方法、方法引用、新日期时间 API（java.time，不可变、线程安全）、LongAdder、原子增强。</p>
+<p><strong>追问：</strong>
+- 追问1：Stream 是并行的吗？ → 默认串行，调用 <code>parallel()</code> 转为 ForkJoinPool.commonPool 并行流。共享池在 CPU 密集任务时合适，IO 密集会阻塞其他任务。
+- 追问2：Optional 能替代 null 检查吗？ → 它鼓励调用方显式处理空，但不能完全替代。滥用 Optional（如 <code>Optional&lt;T&gt;</code> 作字段）反而增加包装开销。
+- 追问3：CompletableFuture 默认线程池是什么？ → ForkJoinPool.commonPool。生产中建议传入自定义 Executor，避免公共池被慢任务占满。</p>
+<p><strong>代码示例：</strong></p>
+<pre><code class="language-java">// Stream 流水线
+List&lt;String&gt; result = list.stream()
+    .filter(s -&gt; s.startsWith(&quot;a&quot;))
+    .map(String::toUpperCase)
+    .sorted()
+    .collect(Collectors.toList());
+
+// Optional 链式
+String name = user.map(User::getAddress)
+                   .map(Address::getCity)
+                   .orElse(&quot;未知&quot;);
+
+// CompletableFuture 编排
+CompletableFuture&lt;String&gt; f1 = CompletableFuture.supplyAsync(() -&gt; &quot;hello&quot;);
+CompletableFuture&lt;String&gt; f2 = f1.thenApply(s -&gt; s + &quot; world&quot;);
+CompletableFuture&lt;String&gt; f3 = f2.thenCompose(s -&gt; CompletableFuture.supplyAsync(() -&gt; s + &quot;!&quot;));
+String r = f3.get(); // hello world!
+</code></pre>
+<p><strong>常见误区：</strong>
+- 以为 parallel() 一定更快——IO 密集或小数据量反而更慢。
+- 以为 Optional 可以序列化——Optional 不实现 Serializable。
+- 在 Stream 里修改外部变量（副作用）——破坏不可变意图，并行时会出错。</p>
+<p><strong>版本说明：</strong> Lambda/Stream/Optional/CompletableFuture 自 Java 8。Java 9 Stream 增加 takeWhile/dropOf/ofNullable；Java 16 pattern matching（预览）；Java 17 正式 switch 表达式。</p>
+<hr />
+<h3>9. equals() 与 hashCode() 契约</h3>
+<p><strong>Q：为什么重写 equals() 必须同时重写 hashCode()？违反了会怎样？</strong></p>
+<p><strong>解答：</strong></p>
+<p><strong>契约（Object 规范）：</strong></p>
+<ol>
+<li><strong>自反性</strong>：<code>x.equals(x) == true</code>。</li>
+<li><strong>对称性</strong>：<code>x.equals(y) == y.equals(x)</code>。</li>
+<li><strong>传递性</strong>：<code>x.equals(y) &amp;&amp; y.equals(z) → x.equals(z)</code>。</li>
+<li><strong>一致性</strong>：多次调用结果不变。</li>
+<li><strong>非空性</strong>：<code>x.equals(null) == false</code>。</li>
+</ol>
+<p><strong>hashCode 契约：</strong></p>
+<ul>
+<li>同一对象多次调用必须返回同一个 int。</li>
+<li><code>a.equals(b)</code> 为 true → <code>a.hashCode() == b.hashCode()</code>。</li>
+<li><code>a.hashCode() != b.hashCode()</code> → <code>!a.equals(b)</code>（逆否命题）。</li>
+</ul>
+<p><strong>为什么必须同时重写：</strong> HashMap、HashSet 等基于哈希的集合，先用 hashCode 定位桶，再用 equals 在桶内查找。如果两个 equals 相等的对象 hashCode 不同，会被放到不同桶，HashSet 认为它们不重复，导致重复存储。</p>
+<p><strong>违反后果：</strong> 把对象放入 HashSet 后，修改参与 equals 计算的字段，导致 hashCode 变化，之后 <code>contains</code> 找不到该对象，内存中也无法 remove，造成"幽灵对象"。</p>
+<p><strong>追问：</strong>
+- 追问1：equals 相等 hashCode 一定相等吗？ → 契约要求必须相等。反之不要求（hash 冲突允许）。
+- 追问2：重写 equals 为什么要 getClass() 还是 instanceof？ → instanceof 破坏对称（子类 equals 父类）。LSP 场景下推荐 getClass()，除非父类定义了基于某个字段的 equals 且子类不扩展语义（如 Lombok @Value 可设 callSuper）。
+- 追问3：JDK 7+ 的 Objects.equals/hash 工具？ → 避免手写 null 检查和 hash 组合，<code>Objects.hash(a, b, c)</code>。</p>
+<p><strong>代码示例：</strong></p>
+<pre><code class="language-java">public class User {
+    private final String id;
+    private final String name;
+
+    @Override
+    public boolean equals(Object o) {
+        if (this == o) return true;
+        if (!(o instanceof User)) return false;
+        User u = (User) o;
+        return Objects.equals(id, u.id) &amp;&amp; Objects.equals(name, u.name);
+    }
+
+    @Override
+    public int hashCode() {
+        return Objects.hash(id, name);
+    }
+}
+</code></pre>
+<p><strong>常见误区：</strong>
+- 只重写 equals 不重写 hashCode。
+- 用 mutable 字段参与 equals/hashCode，对象入集合后修改字段导致定位失效。
+- equals 里把参数强转前不先类型检查，导致 CCE。</p>
+<p><strong>版本说明：</strong> Java 7+ <code>java.util.Objects</code> 工具类。</p>
+<hr />
+<h3>10. 值传递还是引用传递</h3>
+<p><strong>Q：Java 是值传递还是引用传递？</strong></p>
+<p><strong>解答：</strong></p>
+<p><strong>结论：Java 只有值传递。</strong></p>
+<p>对于基本类型，传递的是值的副本；对于引用类型，传递的是<strong>引用本身的值的副本</strong>——栈上的引用变量存的是堆对象的地址，把这个地址值复制一份传给方法。方法内通过这个副本引用可以修改堆对象的内容，但把引用本身重新指向另一个对象，不会影响调用方的原引用。</p>
+<p><strong>关键区分：</strong></p>
+<ul>
+<li>传递引用类型时，方法内 <code>param = new Object()</code> 不会让调用方的变量指向新对象——因为传的是副本。</li>
+<li>但方法内 <code>param.setXxx(...)</code> 会修改堆对象，因为副本指向的还是同一个堆对象。</li>
+</ul>
+<p><strong>追问：</strong>
+- 追问1：为什么不是引用传递？ → 引用传递的定义是"方法拿到的是原变量本身的别名"，可以改变原变量指向。Java 做不到这一点。
+- 追问2：String 作为参数传入方法，方法内修改后调用方会变吗？ → 不会。String 不可变，且传的是引用副本，方法内 <code>str = "new"</code> 只是让副本指向新字符串。</p>
+<p><strong>代码示例：</strong></p>
+<pre><code class="language-java">public static void swap(int a, int b) {
+    int t = a; a = b; b = t;
+}
+int x = 1, y = 2; swap(x, y);
+// x 仍 1, y 仍 2，因为传的是副本
+
+public static void reassign(User u) {
+    u = new User(&quot;new&quot;); // 只改了副本指向
+}
+public static void mutate(User u) {
+    u.setName(&quot;new&quot;); // 改的是同一个堆对象
+}
+User u = new User(&quot;old&quot;);
+reassign(u); // u 仍是 old
+mutate(u);   // u.name 变成 new
+</code></pre>
+<p><strong>常见误区：</strong>
+- 误以为"对象传递就是引用传递"——混淆了"传引用"和"引用传递"两个概念。
+- 试图在方法内交换两个对象引用——Java 做不到，需要用数组或 AtomicReference 包装。</p>
+<p><strong>版本说明：</strong> 语言规范层面自 Java 1.0 即如此。</p>
+<hr />
+<h2 id="二jvm">二、JVM</h2>
+<h3>1. JVM 内存区域划分</h3>
+<p><strong>Q：JVM 运行时数据区有哪些？哪些线程共享、哪些线程私有？</strong></p>
+<p><strong>解答：</strong></p>
+<p><strong>线程私有（生命周期随线程）：</strong></p>
+<ol>
+<li><strong>程序计数器（PC Register）</strong>：当前线程执行字节码的行号指示器。唯一一个没有 OutOfMemoryError 的区域。</li>
+<li><strong>Java 虚拟机栈（VM Stack）</strong>：每个方法调用创建一个栈帧（局部变量表、操作数栈、动态链接、方法出口）。栈太深（无限递归）抛 StackOverflowError；扩展不了抛 OOM。</li>
+<li><strong>本地方法栈（Native Method Stack）</strong>：为 native 方法服务，HotSpot 把它和虚拟机栈合二为一。</li>
+</ol>
+<p><strong>线程共享：</strong></p>
+<ol start="4">
+<li><strong>堆（Heap）</strong>：所有对象实例和数组的分配区域（逃逸分析后可能栈上分配）。GC 主要在这里进行。分为新生代（Eden + Survivor 0/1）和老年代。</li>
+<li><strong>方法区（Method Area）</strong>：存储类信息、常量、静态变量、JIT 编译后的代码。Java 8 之前是永久代（PermGen，堆的一部分），Java 8 改为元空间（Metaspace，使用本地内存）。</li>
+</ol>
+<p><strong>直接内存（Direct Memory）：</strong> 不算 JVM 运行时数据区，但 NIO 的 DirectByteBuffer 使用，也会 OOM。</p>
+<p><strong>追问：</strong>
+- 追问1：堆为什么分代？ → 不同对象生命周期不同。新生代对象朝生夕死，用复制算法；老年代存活率高，用标记-整理。分代让 GC 效率最优。
+- 追问2：栈里存什么？ → 栈帧：局部变量表（基本类型 + 对象引用）、操作数栈、动态链接、返回地址。
+- 追问3：对象一定分配在堆上吗？ → 不一定。逃逸分析后，不会逃出方法的对象可能栈上分配（标量替换），减少 GC 压力。</p>
+<p><strong>代码示例（查看内存）：</strong></p>
+<pre><code class="language-bash"># JVM 参数示例
+-Xms2g -Xmx2g        # 堆初始/最大值
+-Xmn1g               # 新生代大小
+-XX:MetaspaceSize=256m
+-XX:+HeapDumpOnOutOfMemoryError
+</code></pre>
+<p><strong>常见误区：</strong>
+- 以为方法区在堆里——Java 8 元空间在本地内存，不在堆。
+- 以为程序计数器会 OOM——它是唯一只读指针无 OOM 的区域。</p>
+<p><strong>版本说明：</strong> Java 8 永久代 → 元空间。Java 11 ZGC 等新回收器变化不影响区域划分。</p>
+<hr />
+<h3>2. 垃圾标记算法</h3>
+<p><strong>Q：JVM 怎么判断对象可以被回收？GC Roots 有哪些？</strong></p>
+<p><strong>解答：</strong></p>
+<p><strong>引用计数法：</strong> 给对象加引用计数器，新增引用 +1，失效 -1，为 0 则回收。简单但<strong>无法解决循环引用</strong>（A 引用 B，B 引用 A，都不为 0）。JVM 不使用这种方法。</p>
+<p><strong>可达性分析（Reachability Analysis）：</strong> 从 <strong>GC Roots</strong> 出发，沿引用链遍历，不可达的对象判定为可回收。</p>
+<p><strong>GC Roots 包括：</strong></p>
+<ol>
+<li>虚拟机栈（栈帧局部变量表）中引用的对象。</li>
+<li>方法区中静态变量引用的对象。</li>
+<li>方法区中常量引用的对象。</li>
+<li>本地方法栈 JNI（native 方法）引用的对象。</li>
+<li>Java 虚拟机内部引用（基本类型 Class、异常对象、类加载器）。</li>
+<li>同步锁 <code>synchronized</code> 持有的对象。</li>
+<li>JMXBean、JVMTI 等隐含引用。</li>
+</ol>
+<p><strong>引用强度（Java 4+）：</strong></p>
+<ul>
+<li><strong>强引用</strong>：<code>Object o = new Object()</code>，永不回收。</li>
+<li><strong>软引用（SoftReference）</strong>：内存不足时回收，适合缓存。</li>
+<li><strong>弱引用（WeakReference）</strong>：下次 GC 就回收，如 WeakHashMap 的 key。</li>
+<li><strong>虚引用（PhantomReference）</strong>：唯一作用是回收时收到通知，用于管理堆外内存。</li>
+</ul>
+<p><strong>追问：</strong>
+- 追问1：为什么引用计数法不行？ → 循环引用问题，主流 JVM 都用可达性分析。
+- 追问2：静态变量为什么是 GC Roots？ → 因为静态变量在方法区，随类生命周期，不会被 GC。
+- 追问3：不可达对象一定被回收吗？ → 不一定。要经过两次标记：第一次标记+筛选（是否有必要执行 finalize()），有 finalize 且未执行过的放入 F-Queue，由低优先级线程执行，第二次标记后才真正回收。不推荐用 finalize()。</p>
+<p><strong>常见误区：</strong>
+- 以为 GC Roots 包括所有对象——只包括"活的起点"。
+- 以为弱引用一定会马上回收——下次 GC 才回收。
+- 误以为可以用 finalize 做资源清理——不可靠，Java 9 已废弃。</p>
+<p><strong>版本说明：</strong> 引用体系自 Java 1.2；finalize 在 Java 9 被 Deprecated。</p>
+<hr />
+<h3>3. 垃圾收集算法</h3>
+<p><strong>Q：讲讲几种垃圾收集算法，各自适用场景？</strong></p>
+<p><strong>解答：</strong></p>
+<p><strong>标记-清除（Mark-Sweep）：</strong> 先标记所有要回收的对象，然后统一清除。
+- 缺点：产生大量内存碎片；碎片多了大对象找不到连续空间会提前触发 Full GC。
+- 适用：老年代（存活率高）。</p>
+<p><strong>标记-复制（Mark-Copy）：</strong> 把内存分为两块，每次只用一块，回收时把存活对象复制到另一块，然后整块清空。
+- 优点：无碎片，分配快。
+- 缺点：内存利用率只有 50%。
+- 改进：新生代 Eden:Survivor = 8:1:1，每次只用 90%，存活对象复制到 Survivor，浪费 10%。
+- 适用：新生代（朝生夕死，存活率低）。</p>
+<p><strong>标记-整理（Mark-Compact）：</strong> 标记后让所有存活对象向一端移动，然后清理边界外内存。
+- 优点：无碎片，内存利用率 100%。
+- 缺点：移动对象要更新引用，开销大。
+- 适用：老年代。</p>
+<p><strong>分代收集：</strong> 综合以上——新生代用复制，老年代用标记-清除或标记-整理。</p>
+<p><strong>追问：</strong>
+- 追问1：为什么新生代 Eden:Survivor = 8:1:1？ → 新生代对象 98% 朝生夕死，Eden 占 80% 足够大，Survivor 各 10% 能容纳少量存活对象。
+- 追问2：复制算法浪费 10%，为什么不用 50%？ → 50% 利用率太低；8:1:1 在存活率 10% 以内时足够，超了会触发担保（老年代分配）。
+- 追问3：标记整理为什么慢？ → 移动对象 + 并发更新所有引用，STW 时间长。</p>
+<p><strong>常见误区：</strong>
+- 以为老年代用标记-清除——CMS 用标记-清除，G1/Shenandoah/ZGC 用标记-整理（或复制）。</p>
+<p><strong>版本说明：</strong> 分代思想自早期 JDK；G1 开始 Region 化打破物理分代。</p>
+<hr />
+<h3>4. 经典垃圾收集器</h3>
+<p><strong>Q：讲讲 Serial、ParNew、Parallel Scavenge、CMS、G1、ZGC 的特点和适用场景？</strong></p>
+<p><strong>解答：</strong></p>
+<p><strong>Serial / Serial Old：</strong> 单线程收集器，STW。Client 模式或小堆应用。
+<strong>ParNew：</strong> Serial 多线程版，配合 CMS 使用。
+<strong>Parallel Scavenge / Parallel Old：</strong> 新生代复制 + 老年代整理，多线程。目标是<strong>吞吐量</strong>（运行用户代码时间/总时间）。适合后台计算类任务。JDK 8 默认。</p>
+<p><strong>CMS（Concurrent Mark Sweep，Concurrent Mark-Sweep）：</strong> 低停顿收集器，老年代使用。
+- 四阶段：初始标记（STW）→ 并发标记 → 重新标记（STW）→ 并发清除。
+- 优点：并发收集，低停顿。
+- 缺点：标记-清除有碎片；对 CPU 敏感；Concurrent Mode Failure 时退化为 Serial Old（Full GC STW）。
+- Java 9 废弃，Java 14 移除。</p>
+<p><strong>G1（Garbage First）：</strong> JDK 9 默认收集器。把堆划分为多个大小相等的 Region（1~32MB），每个 Region 可以是 Eden/Survivor/Old/Humongous。
+- 优先回收垃圾最多的 Region（Garbage First）。
+- 可预测停顿时间模型（<code>-XX:MaxGCPauseMillis</code>）。
+- 整体并发，Region 间复制无碎片。
+- 适合大堆（6GB+）、低延迟需求。</p>
+<p><strong>ZGC（Z Garbage Collector）：</strong> JDK 11 引入，JDK 15 成熟。
+- 目标：STW 不超过 10ms，且不随堆大小增长。
+- 染色指针（Colored Pointers）+ 读屏障实现并发标记/转移/重定位。
+- 支持 TB 级堆。
+- JDK 16 并发栈处理；JDK 21 分代 ZGC。</p>
+<p><strong>Shenandoah：</strong> RedHat 主导，类似 ZGC，并发整理，低停顿。</p>
+<p><strong>追问：</strong>
+- 追问1：CMS 为什么被废弃？ → 碎片问题、Concurrent Mode Failure 退化为 Serial Old、维护成本高，G1/ZGC 已经更优。
+- 追问2：G1 为什么比 CMS 好？ → 无碎片（整理）、可预测停顿、Region 化更灵活。
+- 追问3：ZGC 怎么做到 10ms 以下？ → 染色指针把 GC 信息藏在指针高位，读写并发转移时用读屏障"自愈"引用，避免 STW 更新引用。</p>
+<p><strong>常见误区：</strong>
+- 以为 Parallel Scavenge 是低延迟——它是高吞吐量。
+- 以为 G1 适合所有场景——小堆应用 Serial/Parallel 反而简单高效。</p>
+<p><strong>版本说明：</strong> CMS JDK 9 废弃/JDK 14 移除；G1 JDK 9 默认；ZGC JDK 11 引入/JDK 15 生产可用/JDK 21 分代。</p>
+<hr />
+<h3>5. 类加载机制</h3>
+<p><strong>Q：讲讲类加载过程和双亲委派模型？什么情况下会破坏双亲委派？</strong></p>
+<p><strong>解答：</strong></p>
+<p><strong>类加载过程（7 步）：</strong></p>
+<ol>
+<li><strong>加载（Loading）</strong>：通过类全限定名获取字节流，生成 Class 对象。</li>
+<li><strong>验证（Verification）</strong>：验证字节码合法性（文件格式、元数据、字节码、符号引用）。</li>
+<li><strong>准备（Preparation）</strong>：静态变量分配内存并赋零值（如 <code>static int x = 123</code>，准备阶段 x=0，初始化才是 123）。<code>static final</code> 常量在此阶段赋值。</li>
+<li><strong>解析（Resolution）</strong>：符号引用替换为直接引用（内存指针）。</li>
+<li><strong>初始化（Initialization）</strong>：执行 <code>&lt;clinit&gt;()</code>，即静态变量赋值 + static 块。</li>
+<li><strong>使用（Using）</strong>。</li>
+<li><strong>卸载（Unloading）</strong>。</li>
+</ol>
+<p><strong>双亲委派模型（Parent Delegation）：</strong></p>
+<p>类加载器层次：
+- <strong>Bootstrap ClassLoader</strong>：C++ 写，加载 <code>rt.jar</code> 等核心类（<code>java.lang.*</code>）。
+- <strong>ExtClassLoader / PlatformClassLoader</strong>（Java 8 叫 Ext，Java 9 叫 Platform）：加载扩展类。
+- <strong>AppClassLoader / SystemClassLoader</strong>：加载 classpath。</p>
+<p><strong>工作流程：</strong> 收到加载请求时，先委托给父加载器，父加载器加载不了，子加载器才自己尝试加载。</p>
+<p><strong>为什么这样设计：</strong> 安全。防止核心类（如 <code>java.lang.String</code>）被恶意替换——无论谁加载，最终都委派到 Bootstrap，加载的是 JDK 自带的 String。</p>
+<p><strong>破坏双亲委派的场景：</strong></p>
+<ol>
+<li><strong>JDBC</strong>：DriverManager 是 rt.jar 中的类（Bootstrap 加载），要加载第三方 jar 中的 Driver 实现。Bootstrap 看不到 classpath，所以引入了<strong>线程上下文类加载器（TCCL）</strong>，反向委派 AppClassLoader 加载。</li>
+<li><strong>OSGi / 模块化</strong>：每个 Bundle 有自己的类加载器，网状委派。</li>
+<li><strong>Tomcat</strong>：每个 WebApp 有独立 ClassLoader，先自己加载（WebappClassLoader），再委派父加载器——为了应用隔离。</li>
+<li><strong>SPI 机制</strong>：<code>ServiceLoader</code> 配合 TCCL。</li>
+</ol>
+<p><strong>追问：</strong>
+- 追问1：如何自定义类加载器？ → 继承 ClassLoader，重写 <code>findClass()</code>（不是 loadClass，loadClass 是双亲委派逻辑）。
+- 追问2：Tomcat 为什么打破双亲委派？ → 多个 Web 应用部署在一个 Tomcat，需要隔离（不同应用的同名类不能互相影响），所以先自己加载。
+- 追问3：类初始化时机？ → new、反射、子类初始化触发父类初始化、main 类、static 调用等。</p>
+<p><strong>代码示例：</strong></p>
+<pre><code class="language-java">// 自定义类加载器（保留双亲委派）
+class MyClassLoader extends ClassLoader {
+    @Override
+    protected Class&lt;?&gt; findClass(String name) throws ClassNotFoundException {
+        byte[] bytes = loadClassBytes(name); // 从磁盘/网络读取
+        return defineClass(name, bytes, 0, bytes.length);
+    }
+}
+</code></pre>
+<p><strong>常见误区：</strong>
+- 以为重写 loadClass 就是双亲委派——应该重写 findClass，否则会破坏委派。
+- 以为 <code>static int x = 123</code> 在准备阶段赋值——准备阶段是 0，初始化才是 123。</p>
+<p><strong>版本说明：</strong> Java 9 引入模块化（JPMS），类加载器层次有调整（Bootstrap 不再是单一 ClassLoader）。</p>
+<hr />
+<h3>6. JVM 调优与排查工具</h3>
+<p><strong>Q：常用 JVM 调优参数有哪些？OOM 怎么排查？</strong></p>
+<p><strong>解答：</strong></p>
+<p><strong>常用参数：</strong></p>
+<pre><code class="language-bash"># 堆
+-Xms / -Xmx        # 初始/最大堆（建议设相同避免动态扩缩）
+-Xmn               # 新生代大小
+-XX:NewRatio=2     # 老年代:新生代 = 2:1
+-XX:SurvivorRatio=8
+
+# 元空间
+-XX:MetaspaceSize / -XX:MaxMetaspaceSize
+
+# GC
+-XX:+UseG1GC
+-XX:MaxGCPauseMillis=200
+-XX:+PrintGCDetails -Xloggc:gc.log  # JDK 9+ 用 -Xlog:gc*
+
+# OOM dump
+-XX:+HeapDumpOnOutOfMemoryError
+-XX:HeapDumpPath=/path/to/dump.hprof
+</code></pre>
+<p><strong>OOM 排查流程：</strong></p>
+<ol>
+<li><strong>拿到 heap dump</strong>：<code>-XX:+HeapDumpOnOutOfMemoryError</code> 自动生成。</li>
+<li><strong>MAT / JProfiler 分析 dump</strong>：看 Dominator Tree，找占用最大的对象，排查泄漏点。</li>
+<li><strong>常见泄漏场景</strong>：ThreadLocal 未 remove、静态集合无限增长、未关闭连接、监听器未注销。</li>
+</ol>
+<p><strong>jstat / jmap / jstack / jhat：</strong></p>
+<ul>
+<li><strong>jstat -gcutil <pid> 1s</strong>：实时看各代使用率、GC 次数/时间。</li>
+<li><strong>jmap -heap <pid></strong>：堆配置。</li>
+<li><strong>jmap -dump:format=b,file=heap.hprof <pid></strong>：手动 dump。</li>
+<li><strong>jstack <pid></strong>：线程栈，排查死锁、CPU 高（找到 busy 线程看栈）。</li>
+<li><strong>jhat</strong>（已废弃）：分析 dump。</li>
+<li><strong>jcmd</strong>（推荐）：统一诊断入口，<code>jcmd &lt;pid&gt; Thread.print</code>、<code>jcmd &lt;pid&gt; GC.heap_info</code>。</li>
+</ul>
+<p><strong>CPU 高排查：</strong></p>
+<pre><code class="language-bash">top -Hp &lt;pid&gt;          # 找最忙的线程 pid
+printf &quot;%x\n&quot; &lt;tid&gt;    # 转十六进制
+jstack &lt;pid&gt; | grep &lt;hex_tid&gt;  # 看栈
+</code></pre>
+<p><strong>追问：</strong>
+- 追问1：为什么 -Xms 和 -Xmx 设成一样？ → 避免堆动态扩缩的抖动，启动时一次性分配。
+- 追问2：jmap -dump 会 STW 吗？ → 会。线上用 jmap:live 或 jcmd GC.heap_dump，大堆会暂停很久。
+- 追问3：怎么判断 CPU 高是代码问题还是 GC 问题？ → jstat 看 GC 频率；如果 GC 时间占比高，先 GC 问题，否则看业务线程栈。</p>
+<p><strong>常见误区：</strong>
+- 盲目调大堆——大堆导致 Full GC STW 更长。
+- 用 jmap dump 生产大堆——应先在小流量节点或用 jcmd 异步 dump。</p>
+<p><strong>版本说明：</strong> JDK 9 统一日志（-Xlog）；jhat 已移除；jcmd 取代大部分 jmap/jstack 功能。</p>
+<hr />
+<h3>7. 方法区 / 元空间变迁</h3>
+<p><strong>Q：为什么永久代被移除？元空间有什么变化？</strong></p>
+<p><strong>解答：</strong></p>
+<p><strong>永久代（PermGen，Java 7 及之前）：</strong> 方法区的实现，是堆的一部分，有固定上限（<code>-XX:MaxPermSize</code>）。存储类信息、常量、静态变量。</p>
+<p><strong>问题：</strong>
+- 大小难以预估，类加载多了容易 OOM: PermGen space。
+- 与 GC 联动差，回收效率低。
+- JRockit（BEA 的 JVM，后被 Oracle 收购）没有永久代，HotSpot 要融合 JRockit，需要移除永久代。</p>
+<p><strong>元空间（Metaspace，Java 8+）：</strong></p>
+<ul>
+<li>使用<strong>本地内存</strong>（不再是堆的一部分），默认最大是系统可用内存。</li>
+<li>类元数据存到本地内存的元空间。</li>
+<li>字符串常量池移到堆（Java 7 已经移了）。</li>
+<li>静态变量也移到堆（Java 8）。</li>
+<li>仍有 OOM：<code>OutOfMemoryError: Metaspace</code>。</li>
+<li>参数：<code>-XX:MetaspaceSize</code>（初始高水位，超过触发 Full GC）、<code>-XX:MaxMetaspaceSize</code>（建议设置，避免吃光本地内存）。</li>
+</ul>
+<p><strong>追问：</strong>
+- 追问1：字符串常量池在哪？ → Java 6 在永久代，Java 7 移到堆，Java 8 仍在堆。
+- 追问2：元空间用本地内存，会不会让 JVM 不稳定？ → 可能吃光系统内存，所以要设 MaxMetaspaceSize。
+- 追问3：为什么 Java 8 不直接用堆存类元数据？ → 永久代在堆导致 GC 复杂（要扫描堆外元数据），本地内存可以独立管理。</p>
+<p><strong>常见误区：</strong>
+- 以为元空间无 OOM——只是搬到本地内存，仍可能超限。
+- 以为字符串常量池在方法区——Java 7 起在堆。</p>
+<p><strong>版本说明：</strong> Java 7 字符串常量池入堆；Java 8 永久代 → 元空间；Java 9 模块化进一步封装。</p>
+<hr />
+<h3>8. 对象创建与内存布局</h3>
+<p><strong>Q：new 一个对象的过程是怎样的？对象在内存里怎么布局？什么是指针压缩？</strong></p>
+<p><strong>解答：</strong></p>
+<p><strong>对象创建过程（new）：</strong></p>
+<ol>
+<li><strong>类加载检查</strong>：检查 new 的类是否已加载、解析、初始化。没有则先类加载。</li>
+<li><strong>分配内存</strong>：堆中划分内存。
+   - 指针碰撞（Bump the Pointer）：内存规整时用指针移动。
+   - 空闲列表（Free List）：内存不规整时维护空闲块列表。
+   - 并发安全：CAS + 失败重试，或 <strong>TLAB（Thread Local Allocation Buffer）</strong>——每个线程在 Eden 预分配一小块，线程内分配无锁。</li>
+<li><strong>零值初始化</strong>：对象字段赋零值（保证代码不访问即可用）。</li>
+<li><strong>设置对象头</strong>：Mark Word、类型指针（Klass Pointer）。</li>
+<li><strong>执行 <code>&lt;init&gt;()</code></strong>：构造器。</li>
+</ol>
+<p><strong>对象内存布局：</strong></p>
+<ul>
+<li><strong>对象头（Header）</strong>：</li>
+<li>Mark Word（8 字节，64 位 JVM）：哈希码、GC 分代年龄、锁状态标志、线程持有的锁、偏向线程 ID。</li>
+<li>类型指针 Klass Pointer：指向方法区类元数据。开启指针压缩后 4 字节。</li>
+<li>数组长度（如果是数组）。</li>
+<li><strong>实例数据（Instance Data）</strong>：字段内容。</li>
+<li><strong>对齐填充（Padding）</strong>：HotSpot 要求对象大小是 8 字节整数倍。</li>
+</ul>
+<p><strong>指针压缩（Compressed Oops）：</strong> 64 位 JVM 上，堆小于 32GB 时，用 32 位指针（4 字节）表示堆内偏移（按 8 字节对齐除以 8），可寻址 32GB。节省内存，提高缓存效率。<code>-XX:+UseCompressedOops</code>（默认开）。</p>
+<p><strong>追问：</strong>
+- 追问1：为什么对象要对齐？ → HotSpot 要求对象起始地址是 8 字节整数倍，便于快速寻址。
+- 追问2：TLAB 是什么？ → 每个线程在 Eden 私有区域分配对象，避免多线程分配竞争。
+- 追问3：对象一定在堆上吗？ → 逃逸分析后，未逃逸对象可能栈上分配或标量替换（对象拆散成局部变量）。</p>
+<p><strong>常见误区：</strong>
+- 以为 new 一定在堆——逃逸分析后栈上分配。
+- 以为对象头里存的是字段默认值——对象头只有 Mark Word + 类型指针。</p>
+<p><strong>版本说明：</strong> TLAB 自早期 HotSpot；指针压缩自 JDK 6u23；逃逸分析栈上分配自 JDK 7。</p>
+<hr />
+<h3>9. Java 内存模型 JMM</h3>
+<p><strong>Q：什么是 JMM？happens-before 是什么？volatile 保证什么？</strong></p>
+<p><strong>解答：</strong></p>
+<p><strong>JMM（Java Memory Model）：</strong> 定义了多线程下共享变量的访问规则。每个线程有自己的工作内存（CPU 寄存器/缓存），共享变量在主内存。线程不能直接读写主内存，必须通过工作内存中转。JMM 规定了何时线程的写入对另一线程可见、何时要刷新到主内存。</p>
+<p><strong>三大特性：</strong></p>
+<ul>
+<li><strong>可见性</strong>：一个线程修改了共享变量，其他线程能立即看到。</li>
+<li><strong>原子性</strong>：操作不可分割，要么全成功要么全失败。</li>
+<li><strong>有序性</strong>：程序执行顺序。编译器和 CPU 会指令重排，JMM 禁止特定类型的重排。</li>
+</ul>
+<p><strong>happens-before 原则（前一个操作的结果对后一个可见）：</strong></p>
+<ol>
+<li>程序次序规则：单线程内，前操作 happens-before 后操作。</li>
+<li>锁规则：unlock happens-before 后续 lock。</li>
+<li>volatile 规则：volatile 写 happens-before 后续 volatile 读。</li>
+<li>传递性：A happens-before B，B happens-before C → A happens-before C。</li>
+<li>线程启动规则：start() happens-before 线程内操作。</li>
+<li>线程终止规则：线程内操作 happens-before 其他线程检测到它结束。</li>
+<li>对象终结规则：构造器结束 happens-before finalize。</li>
+</ol>
+<p><strong>volatile 语义：</strong></p>
+<ul>
+<li><strong>可见性</strong>：写 volatile 立即刷主内存，读 volatile 从主内存读。</li>
+<li><strong>禁止指令重排</strong>：插入内存屏障（StoreStore / StoreLoad / LoadLoad / LoadStore）。</li>
+<li><strong>不保证原子性</strong>：<code>volatile int i; i++</code> 仍非线程安全（读-改-写三步）。</li>
+</ul>
+<p><strong>典型应用：双重检查锁单例：</strong></p>
+<pre><code class="language-java">public class Singleton {
+    private static volatile Singleton instance; // 必须 volatile
+
+    public static Singleton getInstance() {
+        if (instance == null) {               // 第一次检查
+            synchronized (Singleton.class) {
+                if (instance == null) {        // 第二次检查
+                    instance = new Singleton(); // 非原子：分配内存→构造→赋值
+                }
+            }
+        }
+        return instance;
+    }
+}
+</code></pre>
+<p>为什么要 volatile？<code>new Singleton()</code> 不是原子操作，可能重排为：分配内存 → 赋值引用 → 构造对象。其他线程在第一次检查时看到非 null 但未构造完的对象。volatile 禁止重排。</p>
+<p><strong>追问：</strong>
+- 追问1：volatile 能保证原子性吗？ → 不能。i++ 是读-改-写三步。
+- 追问2：synchronized 和 volatile 区别？ → synchronized 保证原子性+可见性+有序性，volatile 只保证可见性和有序性，不保证原子性。
+- 追问3：happens-before 是不是时间先后？ → 不是。它是 JMM 的偏序关系，保证前一个操作的结果对后一个可见。</p>
+<p><strong>常见误区：</strong>
+- 以为 volatile 能保证 i++ 安全——不能。
+- 以为 happens-before 是时间先后——它是可见性保证，不是物理时间。
+- 双重检查锁不加 volatile——有读到半初始化对象的风险。</p>
+<p><strong>版本说明：</strong> JMM 自 Java 5 JSR-133 修订，volatile 语义大幅强化。</p>
+<hr />
+<h3>10. Full GC 触发条件与避免</h3>
+<p><strong>Q：什么情况下会触发 Full GC？如何避免频繁 Full GC？</strong></p>
+<p><strong>解答：</strong></p>
+<p><strong>Full GC 触发条件：</strong></p>
+<ol>
+<li><strong>老年代空间不足</strong>：新生代 Minor GC 后，存活对象太大放不下老年代。</li>
+<li><strong>方法区/元空间不足</strong>：类加载过多、常量池满。</li>
+<li><strong><code>System.gc()</code> 显式调用</strong>（可被 <code>-XX:+DisableExplicitGC</code> 禁用）。</li>
+<li><strong>空间分配担保失败</strong>：Minor GC 前检查老年代连续空间是否大于新生代对象总和，不满足且不允许担保失败则 Full GC。</li>
+<li><strong>CMS 的 Concurrent Mode Failure</strong>：并发标记时老年代不够用，退化为 Serial Old Full GC。</li>
+<li><strong>晋升失败（Promotion Failed）</strong>：Survivor 放不下，要晋升老年代，但老年代也没空间。</li>
+</ol>
+<p><strong>Minor GC vs Full GC：</strong></p>
+<ul>
+<li>Minor GC：回收新生代，STW 但快，频繁发生。</li>
+<li>Full GC：回收整个堆 + 方法区，STW 长，应避免。</li>
+</ul>
+<p><strong>避免频繁 Full GC：</strong></p>
+<ol>
+<li>合理设置堆大小和各代比例。</li>
+<li>避免大对象（大数组、大字符串）直接进老年代。</li>
+<li>控制对象生命周期，及时释放无用引用。</li>
+<li>监控晋升速率，调整 Survivor 大小让对象在新生代就回收。</li>
+<li>选择合适收集器（G1/ZGC）降低 Full GC STW。</li>
+<li>检查内存泄漏（静态集合、ThreadLocal、连接未关）。</li>
+</ol>
+<p><strong>追问：</strong>
+- 追问1：Minor GC 一定 STW 吗？ → 是。新生代收集必须暂停所有应用线程，保证遍历准确性。
+- 追问2：为什么大对象直接进老年代？ → 大对象在 Eden 和 Survivor 之间复制开销大，JVM 设 <code>-XX:PretenureSizeThreshold</code> 超过直接进老年代。
+- 追问3：空间分配担保是什么？ → Minor GC 前检查老年代连续空间是否足够容纳所有新生代对象，不够则看是否允许担保失败（HandlePromotionFailure）。</p>
+<p><strong>常见误区：</strong>
+- 以为 Full GC 一定堆满——元空间满、System.gc()、担保失败也会触发。
+- 频繁 Full GC 就调大堆——可能是泄漏，要先 dump。</p>
+<p><strong>版本说明：</strong> G1/ZGC 的 Full GC 触发逻辑不同（G1 有 Mixed GC，ZGC 基本不 Full GC）。</p>
+<hr />
+<h2 id="三并发与多线程">三、并发与多线程</h2>
+<h3>1. synchronized 底层原理</h3>
+<p><strong>Q：synchronized 底层是怎么实现的？锁升级过程？偏向锁、轻量级锁、重量级锁区别？</strong></p>
+<p><strong>解答：</strong></p>
+<p><strong>底层实现：</strong> synchronized 基于对象头的 Mark Word 和 Monitor（管程）实现。</p>
+<ul>
+<li><strong>同步代码块</strong>：字节码里 <code>monitorenter</code> 和 <code>monitorexit</code> 指令。monitorenter 尝试获取对象的 Monitor，计数器 +1；monitorexit 计数器 -1，归 0 释放。</li>
+<li><strong>同步方法</strong>：方法访问标志 <code>ACC_SYNCHRONIZED</code>，调用时检查是否持有 monitor。</li>
+</ul>
