@@ -72,6 +72,7 @@ I use the blog as a public engineering notebook: fewer hot takes, more system di
 | [Agent Harness：把模型变成可靠执行系统](https://yjd953.github.io/yjd953/#article-runtime) | 六层运行时架构、状态机、控制回路与恢复机制 |
 | [Tool Protocol：让每次调用都像一笔可信交易](https://yjd953.github.io/yjd953/#article-tools) | Schema、权限、幂等、超时、风险分级与事后核验 |
 | [Trace-native Evaluation：从一次得分到持续改进](https://yjd953.github.io/yjd953/#article-eval) | 离线回放、在线信号、轨迹诊断和发布门禁 |
+| [后端开发八股文指南](https://yjd953.github.io/yjd953/#article-interview) | Java、Go、JVM、Redis、MySQL、MQ、网络、分布式九大模块，90个高频面试知识点 |
 | [Open the full field notes](https://yjd953.github.io/yjd953/) | Agent Harness 专题博客、系统图解与工程检查表 |
 
 ## Featured project
@@ -82,7 +83,7 @@ I use the blog as a public engineering notebook: fewer hot takes, more system di
   </a>
 </div>
 
-**[Math-Practice-Mini-Program](https://github.com/yjd953/Math-Practice-Mini-Program)** — 一款基于微信小程序的手写口算练习平台。用户通过手写数字进行数学运算练习，结合 OCR 文字识别自动判题，并提供 AI 学习助手、错题复盘与历史记录等功能。
+**[Math-Practice-Mini-Program](https://github.com/yjd953/Math-Practice-Mini-Program)** — 一款基于微信小程序的手写口算练习平台。用户通过手写数字进行运算练习，结合 OCR 文字识别自动判题，并提供 AI 学习助手、错题复盘与历史记录等功能。
 
 `JavaScript` · `WeChat Mini Program` · `OCR` · `Education`
 
