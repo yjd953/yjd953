@@ -42,7 +42,7 @@ jobs:
           cache: npm
       - name: Build static pages
         run: |
-          npm ci
+          npm ci --registry=https://registry.npmjs.org
           npm run build
           rm -rf node_modules
       - name: Configure Pages
