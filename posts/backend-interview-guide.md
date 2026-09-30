@@ -989,10 +989,10 @@ class MyClassLoader extends ClassLoader {
 
 **jstat / jmap / jstack / jhat：**
 
-- **jstat -gcutil <pid> 1s**：实时看各代使用率、GC 次数/时间。
-- **jmap -heap <pid>**：堆配置。
-- **jmap -dump:format=b,file=heap.hprof <pid>**：手动 dump。
-- **jstack <pid>**：线程栈，排查死锁、CPU 高（找到 busy 线程看栈）。
+- **jstat**：`jstat -gcutil <pid> 1s`，实时看各代使用率、GC 次数/时间。
+- **jmap heap**：`jmap -heap <pid>`，查看堆配置。
+- **jmap dump**：`jmap -dump:format=b,file=heap.hprof <pid>`，手动 dump。
+- **jstack**：`jstack <pid>`，查看线程栈，排查死锁、CPU 高（找到 busy 线程看栈）。
 - **jhat**（已废弃）：分析 dump。
 - **jcmd**（推荐）：统一诊断入口，`jcmd <pid> Thread.print`、`jcmd <pid> GC.heap_info`。
 

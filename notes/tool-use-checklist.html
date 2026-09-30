@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="A compact release checklist for tool contracts, safety, execution, and verification.">
+  <meta name="theme-color" content="#f1f1ee">
+  <title>A Practical Tool-Use Checklist — Dale Yang</title>
+  <link rel="stylesheet" href="../assets/site.css">
+</head>
+<body class="article-page">
+  <div class="reading-progress" id="readingProgress" aria-hidden="true"></div>
+
+  <header class="site-header">
+    <a class="wordmark" href="../" aria-label="Back to writing index">DY<span>.</span></a>
+    <nav aria-label="Primary">
+      <a href="../">All notes</a>
+      <a href="https://github.com/yjd953">GitHub</a>
+    </nav>
+  </header>
+
+  <main class="article-layout">
+    <header class="article-masthead">
+      <a class="back-link" href="../">← All notes</a>
+      <p class="kicker">02 / Tooling / EN</p>
+      <h1>A Practical Tool-Use Checklist</h1>
+      <p class="article-deck">A compact release checklist for tool contracts, safety, execution, and verification.</p>
+    </header>
+
+    <article class="prose">
+      <p>Before shipping an agent tool, verify the following.</p>
+<h2 id="section-contract">Contract</h2>
+<ul>
+<li>Inputs and outputs are typed and documented.</li>
+<li>Required and optional fields are unambiguous.</li>
+<li>Errors are distinguishable from empty success.</li>
+</ul>
+<h2 id="section-safety">Safety</h2>
+<ul>
+<li>Permissions follow least privilege.</li>
+<li>Sensitive values never appear in prompts or logs.</li>
+<li>Destructive or external actions have explicit boundaries.</li>
+</ul>
+<h2 id="section-execution">Execution</h2>
+<ul>
+<li>Retries are safe or idempotency keys are supported.</li>
+<li>Timeouts and rate limits are handled.</li>
+<li>Partial completion is detectable.</li>
+</ul>
+<h2 id="section-verification">Verification</h2>
+<ul>
+<li>The agent reads the authoritative post-action state.</li>
+<li>Success criteria are machine-checkable where possible.</li>
+<li>Rollback or recovery paths exist.</li>
+</ul>
+<h2 id="section-evaluation">Evaluation</h2>
+<ul>
+<li>Happy paths and adversarial cases are covered.</li>
+<li>Tool selection and argument quality are measured separately.</li>
+<li>Production traces feed regression tests.</li>
+</ul>
+
+    </article>
+  </main>
+
+  <footer class="site-footer article-footer">
+    <a href="../">Dale Yang / Engineering notes</a>
+    <a href="https://github.com/yjd953/yjd953/blob/main/posts/tool-use-checklist.md">View source ↗</a>
+  </footer>
+  <script src="../assets/site.js" defer></script>
+</body>
+</html>

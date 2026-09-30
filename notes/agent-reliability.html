@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Explicit state, contract-first tools, layered evaluation, and operational control.">
+  <meta name="theme-color" content="#f1f1ee">
+  <title>Agent Reliability — Dale Yang</title>
+  <link rel="stylesheet" href="../assets/site.css">
+</head>
+<body class="article-page">
+  <div class="reading-progress" id="readingProgress" aria-hidden="true"></div>
+
+  <header class="site-header">
+    <a class="wordmark" href="../" aria-label="Back to writing index">DY<span>.</span></a>
+    <nav aria-label="Primary">
+      <a href="../">All notes</a>
+      <a href="https://github.com/yjd953">GitHub</a>
+    </nav>
+  </header>
+
+  <main class="article-layout">
+    <header class="article-masthead">
+      <a class="back-link" href="../">← All notes</a>
+      <p class="kicker">01 / Agent systems / EN</p>
+      <h1>From Demo to Production: Four Reliability Pillars for Agents</h1>
+      <p class="article-deck">Explicit state, contract-first tools, layered evaluation, and operational control.</p>
+    </header>
+
+    <article class="prose">
+      <p>Agent demos optimize for possibility. Production systems optimize for repeatability under uncertainty.</p>
+<h2 id="section-1-explicit-state">1. Explicit state</h2>
+<p>Keep task state, user intent, tool results, and pending decisions structured. If the system cannot explain what it believes is true, recovery becomes guesswork.</p>
+<h2 id="section-2-contract-first-tools">2. Contract-first tools</h2>
+<p>Treat every tool as a typed boundary. Validate inputs, constrain side effects, make retries idempotent, and verify the resulting state instead of trusting a success string.</p>
+<h2 id="section-3-layered-evaluation">3. Layered evaluation</h2>
+<p>Combine deterministic checks, model-based evaluation, trace review, and online outcome metrics. A single benchmark cannot represent production behavior.</p>
+<h2 id="section-4-observability-and-control">4. Observability and control</h2>
+<p>Capture decisions, latency, token use, tool calls, errors, and human interventions. Keep high-impact actions reversible and put a human checkpoint where uncertainty meets consequence.</p>
+<h2 id="section-a-useful-mental-model">A useful mental model</h2>
+<pre><code class="language-text">context → reason → act → verify → learn
+</code></pre>
+<p>The model matters, but the loop around the model determines whether an agent is dependable.</p>
+
+    </article>
+  </main>
+
+  <footer class="site-footer article-footer">
+    <a href="../">Dale Yang / Engineering notes</a>
+    <a href="https://github.com/yjd953/yjd953/blob/main/posts/agent-reliability.md">View source ↗</a>
+  </footer>
+  <script src="../assets/site.js" defer></script>
+</body>
+</html>

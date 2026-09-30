@@ -1,11 +1,18 @@
-name: Deploy Agent Harness blog
+name: Deploy engineering notes
 
 on:
   push:
     branches: [main]
     paths:
       - "index.html"
-      - "README.md"
+      - "README*.md"
+      - "assets/site.css"
+      - "assets/site.js"
+      - "notes/**"
+      - "posts/**"
+      - "scripts/**"
+      - "package.json"
+      - "package-lock.json"
       - ".nojekyll"
       - ".github/workflows/pages.yml"
   workflow_dispatch:
@@ -28,6 +35,16 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Build static pages
+        run: |
+          npm ci
+          npm run build
+          rm -rf node_modules
       - name: Configure Pages
         uses: actions/configure-pages@v5
         with:
