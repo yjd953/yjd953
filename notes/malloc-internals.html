@@ -1,0 +1,298 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="追踪 Allocator、Heap、brk、mmap、虚拟页与物理页，解释分配为何不等于占用。">
+  <meta name="theme-color" content="#f1f1ee">
+  <title>malloc 到底干了什么？ — Dale Yang</title>
+  <link rel="stylesheet" href="../assets/site.css">
+</head>
+<body class="article-page">
+  <div class="reading-progress" id="readingProgress" aria-hidden="true"></div>
+
+  <header class="site-header">
+    <a class="wordmark" href="../" aria-label="Dale Yang home">DY<span>.</span></a>
+    <nav aria-label="Primary">
+      <a href="../sections/computer-systems.html">计算机底层</a>
+      <a href="https://github.com/yjd953">GitHub</a>
+    </nav>
+  </header>
+
+  <main class="article-layout">
+    <header class="article-masthead">
+      <a class="back-link" href="../sections/computer-systems.html">← 计算机底层</a>
+      <p class="kicker">02.09 / Memory allocation / ZH</p>
+      <h1>malloc 到底干了什么？</h1>
+      <p class="article-deck">追踪 Allocator、Heap、brk、mmap、虚拟页与物理页，解释分配为何不等于占用。</p>
+    </header>
+
+    <article class="prose">
+      <p>调用：</p>
+<pre><code class="language-c">void *p = malloc(1024);
+</code></pre>
+<p>返回一个地址，看起来像“向操作系统申请了 1024 字节内存”。但多数情况下，这次调用：</p>
+<ul>
+<li>没有进入内核；</li>
+<li>没有精确申请 1024 字节；</li>
+<li>没有立刻分配新的物理页；</li>
+<li>也不保证 <code>free(p)</code> 后 RSS 立即下降。</li>
+</ul>
+<p><code>malloc</code> 是用户态 Allocator 的接口。它在进程虚拟地址空间中管理比 1024 字节更大的区域，再从中切出满足请求的块。</p>
+<h2 id="section-先区分四种内存">先区分四种“内存”</h2>
+<pre><code class="language-text">应用请求大小
+  1024 bytes
+
+Allocator 管理块
+  1024 + 对齐 + 元数据
+
+进程虚拟地址
+  例如 0x7f... 的一段范围
+
+实际驻留物理页
+  访问后才可能分配
+</code></pre>
+<p>这四个数字不必相等。</p>
+<p><code>malloc(1024)</code> 的合同主要是：成功时返回一块至少能容纳 1024 字节、满足对齐要求、当前不与其他已分配对象重叠的可用区域。</p>
+<p>它没有承诺这块区域来自哪里，也没有承诺物理内存何时到位。</p>
+<h2 id="section-第一层allocator-先看自己的库存">第一层：Allocator 先看自己的库存</h2>
+<p>进程链接的 libc 或其他分配器，如 glibc malloc、jemalloc、tcmalloc，会维护空闲块。</p>
+<p>概念结构：</p>
+<pre><code class="language-text">Arena
+├─ allocated chunk
+├─ free chunk
+├─ allocated chunk
+└─ top chunk / unused region
+</code></pre>
+<p>调用 <code>malloc(1024)</code> 时，Allocator 先：</p>
+<ol>
+<li>计算对齐后的内部尺寸；</li>
+<li>查找对应 Size Class 或 Bin；</li>
+<li>尝试复用空闲块；</li>
+<li>必要时切分更大的块；</li>
+<li>更新元数据；</li>
+<li>返回 Payload 地址。</li>
+</ol>
+<p>如果已有合适空闲块，整个过程只是用户态指针和数据结构操作，不需要系统调用。</p>
+<h2 id="section-为什么申请-1024内部可能更多">为什么申请 1024，内部可能更多</h2>
+<p>Allocator 需要：</p>
+<ul>
+<li>对齐到 8、16 或更高字节边界；</li>
+<li>保存 Chunk 大小和状态；</li>
+<li>维护空闲链表或位图；</li>
+<li>满足 SIMD 与 ABI 对齐；</li>
+<li>有时加入安全检测元数据。</li>
+</ul>
+<p>概念上：</p>
+<pre><code class="language-text">┌──────────────┬─────────────────────────┐
+│ chunk header │ 1024-byte user payload  │
+└──────────────┴─────────────────────────┘
+</code></pre>
+<p>具体元数据布局属于分配器实现，不能假设 Header 一定紧挨 Payload，也不应从 <code>p</code> 向前读取内部字段。</p>
+<h2 id="section-free-list-与-size-class">Free List 与 Size Class</h2>
+<p>如果每次都扫描所有空闲区，分配会很慢。Allocator 常按尺寸组织：</p>
+<pre><code class="language-text">16B class
+32B class
+64B class
+...
+1024B class
+...
+</code></pre>
+<p>小对象从对应 Class 快速取得，释放后回到 Cache 或 Bin。</p>
+<p>不同实现采用：</p>
+<ul>
+<li>Segregated Free List；</li>
+<li>Buddy 思想；</li>
+<li>Slab / Span；</li>
+<li>Per-thread Cache；</li>
+<li>多 Arena；</li>
+<li>Bitmap。</li>
+</ul>
+<p>目标是在速度、碎片、并发和内存归还之间折中。</p>
+<h2 id="section-没有空闲块时才向内核要更大区域">没有空闲块时才向内核要更大区域</h2>
+<p>Allocator 可以通过两类接口扩大可管理虚拟空间。</p>
+<h3 id="section-brk"><code>brk</code></h3>
+<p>传统 Heap 尾部由 Program Break 标识：</p>
+<pre><code class="language-text">Data / BSS | Heap 已用 | Top Chunk | program break
+</code></pre>
+<p><code>brk</code> 或历史接口 <code>sbrk</code> 调整 Heap 末端。现代应用不应直接与 malloc 混用 <code>sbrk</code>，因为会破坏分配器对地址空间的假设。</p>
+<h3 id="section-mmap"><code>mmap</code></h3>
+<p>Allocator 也可以建立匿名映射：</p>
+<pre><code class="language-c">mmap(NULL, length,
+     PROT_READ | PROT_WRITE,
+     MAP_PRIVATE | MAP_ANONYMOUS,
+     -1, 0);
+</code></pre>
+<p>较大分配常独立使用 <code>mmap</code>，释放时更容易 <code>munmap</code> 归还整个区域。阈值并非固定常数，分配器可能动态调整。</p>
+<p>因此：</p>
+<pre><code class="language-text">malloc 是用户态分配接口
+brk / mmap 是向内核管理虚拟地址空间的机制
+</code></pre>
+<p>它们不是同一层。</p>
+<h2 id="section-内核返回的首先是虚拟地址">内核返回的首先是虚拟地址</h2>
+<p>假设 Allocator 通过 <code>mmap</code> 获得 4MiB 区域。内核可以先建立 Virtual Memory Area：</p>
+<pre><code class="language-text">0x7f1000000000 ───────── 0x7f1000400000
+read/write, anonymous, private
+</code></pre>
+<p>此时页表中的很多页面还未映射独立物理页。Linux 常采用 Demand Paging 与 Overcommit 策略。</p>
+<p>第一次读取新匿名页时，内核可能映射共享的只读零页；第一次写入时触发 Page Fault，再分配并清零真实物理页。</p>
+<p>所以：</p>
+<pre><code class="language-c">char *p = malloc(1024 * 1024 * 1024ULL);
+</code></pre>
+<p>如果成功，只能说明分配器和内核提供了 1GiB 虚拟地址承诺，不保证 1GiB 物理 RAM 已经驻留，也不保证未来写遍每一页一定成功。</p>
+<h2 id="section-第一次写为什么会变慢">第一次写为什么会变慢</h2>
+<pre><code class="language-c">char *p = malloc(size);
+
+// 分配可能很快
+
+for (size_t i = 0; i &lt; size; i += 4096) {
+    p[i] = 1;
+}
+</code></pre>
+<p>循环按页写入，可能为每页触发 Minor Page Fault：</p>
+<pre><code class="language-text">CPU Store
+→ 页表项尚未存在或为只读零页
+→ Page Fault
+→ 内核分配物理页
+→ 清零并建立映射
+→ 重新执行 Store
+</code></pre>
+<p>这不是程序非法访问，而是虚拟内存正常的 Lazy Allocation。</p>
+<p>若物理内存和 Swap 无法满足，Linux Overcommit 配置下可能在后续触页时触发 OOM，而不是 <code>malloc</code> 当场失败。</p>
+<h2 id="section-physical-memory-在哪一步出现">Physical Memory 在哪一步出现</h2>
+<p>可以把路径写成：</p>
+<pre><code class="language-text">malloc(1024)
+→ Allocator 查空闲块
+  ├─ 命中：返回已有虚拟地址
+  └─ 不足：brk / mmap 扩大虚拟区域
+→ 返回指针
+→ 程序首次写页面
+→ Page Fault
+→ 内核分配物理页
+→ 页表建立映射
+</code></pre>
+<p>小于 Page Size 的多个对象通常共享一个物理页。一个 1024 字节对象并不会让内核分配“恰好 1024 字节物理内存”，物理内存以页为基本管理单位，常见为 4KiB。</p>
+<h2 id="section-free-做了什么"><code>free</code> 做了什么</h2>
+<pre><code class="language-c">free(p);
+</code></pre>
+<p>首先表示该块重新归 Allocator 管理，后续 <code>malloc</code> 可复用。</p>
+<p>它不一定立刻调用 <code>munmap</code>，因为：</p>
+<ul>
+<li>小块与其他对象共享同一页；</li>
+<li>保留空闲块可提高后续分配速度；</li>
+<li>只有 Heap 顶部连续空闲区域容易通过 <code>brk</code> 收缩；</li>
+<li>归还内核也有系统调用和页表维护成本；</li>
+<li>Per-thread Cache 可能暂存块。</li>
+</ul>
+<p>大块独立映射更可能在释放时 <code>munmap</code>。某些 Allocator 也通过 <code>madvise</code> 告诉内核页面内容可丢弃，同时保留虚拟地址映射。</p>
+<p>因此程序 <code>HeapAlloc</code> 下降，不等于 RSS 立即同幅下降。</p>
+<h2 id="section-fragmentation明明有空闲却分配不了">Fragmentation：明明有空闲却分配不了</h2>
+<h3 id="section-internal-fragmentation">Internal Fragmentation</h3>
+<p>请求 33 字节，被分配到 48 或 64 字节 Size Class，多出的空间属于块内部浪费。</p>
+<h3 id="section-external-fragmentation">External Fragmentation</h3>
+<pre><code class="language-text">free 64K | used 64K | free 64K | used 64K
+</code></pre>
+<p>总空闲 128K，但无法提供连续 128K 块。</p>
+<p>虚拟内存缓解物理连续性要求，Allocator 仍要面对虚拟 Chunk 布局和 Size Class 浪费。长期运行且对象尺寸、生命周期混杂的服务尤其容易出现碎片。</p>
+<h2 id="section-多线程让分配器更复杂">多线程让分配器更复杂</h2>
+<p>如果所有线程抢一把全局锁，<code>malloc</code> 会成为瓶颈。因此现代 Allocator 常使用：</p>
+<ul>
+<li>Thread-local Cache；</li>
+<li>多 Arena；</li>
+<li>Per-CPU Cache；</li>
+<li>批量从中央结构搬运对象。</li>
+</ul>
+<p>这样减少锁竞争，却可能让空闲内存滞留在某个线程 Cache 中。某线程释放的内存，另一个线程未必立即复用；线程退出和 Arena 数量也会影响 RSS。</p>
+<p>分配速度、内存占用和跨线程复用之间没有免费方案。</p>
+<h2 id="section-calloc-为什么有时看起来特别快"><code>calloc</code> 为什么有时看起来特别快</h2>
+<pre><code class="language-c">void *p = calloc(n, size);
+</code></pre>
+<p>语义要求初始内容为零。内核新提供的匿名页出于安全必须是零页，因此 Allocator 有时不需要立刻手工清零整个区域。</p>
+<p>在页面真正写入前，它可能共享只读零页或尚未分配物理页。于是 <code>calloc</code> 的调用很快，成本延后到触页阶段。</p>
+<p>但若复用包含旧数据的用户态空闲块，Allocator 必须清零，行为取决于来源和实现。</p>
+<h2 id="section-realloc-为什么可能复制"><code>realloc</code> 为什么可能复制</h2>
+<pre><code class="language-c">p = realloc(p, new_size);
+</code></pre>
+<p>如果原块后面有足够空闲空间，Allocator 可以原地扩展；否则：</p>
+<ol>
+<li>分配新块；</li>
+<li>复制旧内容；</li>
+<li>释放旧块；</li>
+<li>返回新地址。</li>
+</ol>
+<p>因此必须用临时变量处理失败：</p>
+<pre><code class="language-c">void *new_p = realloc(p, new_size);
+if (new_p != NULL) {
+    p = new_p;
+}
+</code></pre>
+<p>直接覆盖 <code>p</code> 会在失败时丢失原地址，造成泄漏。</p>
+<h2 id="section-用实验观察虚拟与物理分离">用实验观察虚拟与物理分离</h2>
+<p>示例：</p>
+<pre><code class="language-c">#include &lt;stdio.h&gt;
+#include &lt;stdlib.h&gt;
+#include &lt;unistd.h&gt;
+
+int main(void) {
+    size_t size = 512UL * 1024 * 1024;
+    char *p = malloc(size);
+    if (!p) return 1;
+
+    printf(&quot;allocated, pid=%d\n&quot;, getpid());
+    getchar();
+
+    for (size_t i = 0; i &lt; size; i += 4096) {
+        p[i] = 1;
+    }
+
+    printf(&quot;touched\n&quot;);
+    getchar();
+    free(p);
+    getchar();
+}
+</code></pre>
+<p>在三个暂停点观察：</p>
+<pre><code class="language-bash">grep -E &#39;VmSize|VmRSS&#39; /proc/&lt;pid&gt;/status
+pmap -x &lt;pid&gt;
+</code></pre>
+<p>常见现象：</p>
+<ol>
+<li><code>malloc</code> 后 VSS / VmSize 增长明显；</li>
+<li>写遍页面后 RSS / VmRSS 才显著增长；</li>
+<li><code>free</code> 后是否下降取决于分配器是否归还映射。</li>
+</ol>
+<p>实际结果受 Overcommit、Transparent Huge Pages、Allocator 和编译优化影响。确保编译器不能删除触页循环。</p>
+<p>观察系统调用：</p>
+<pre><code class="language-bash">strace -e brk,mmap,mremap,munmap ./app
+</code></pre>
+<p>会发现大量小 <code>malloc</code> 并不一一对应系统调用，Allocator 批量管理更大区域。</p>
+<h2 id="section-为什么-malloc-不等于物理内存申请">为什么 <code>malloc</code> 不等于物理内存申请</h2>
+<p>把每层责任放回正确位置：</p>
+<pre><code class="language-text">malloc
+  管理对象大小、对齐、空闲块与并发
+
+brk / mmap
+  管理进程虚拟地址区域
+
+Page Table
+  记录虚拟页如何映射
+
+Page Fault Handler
+  在访问时补齐映射
+
+Physical Memory Manager
+  分配与回收物理页
+</code></pre>
+<p><code>malloc(1024)</code> 只是这条链的最上层。它可能复用现有 Chunk；即使向内核扩大区域，获得的也先是虚拟地址范围；只有页面被实际触达，物理内存才通常逐步进入。</p>
+<p>因此判断内存问题时，不能只看代码请求了多少，也不能只看一个 VSS 数字。必须同时理解 Allocator 统计、虚拟映射、RSS、Page Fault 和内核回收行为。</p>
+
+    </article>
+  </main>
+
+  <footer class="site-footer article-footer">
+    <a href="../sections/computer-systems.html">计算机底层 / 进程、线程与内存</a>
+    <a href="https://github.com/yjd953/yjd953/blob/main/posts/malloc-internals.md">View source ↗</a>
+  </footer>
+  <script src="../assets/site.js" defer></script>
+</body>
+</html>

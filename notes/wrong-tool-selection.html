@@ -1,0 +1,258 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="从一次选错工具的真实式故障，建立 Prompt 到 Runtime Mapping 的排查路径。">
+  <meta name="theme-color" content="#f1f1ee">
+  <title>Agent 为什么会调用错误的 Tool？ — Dale Yang</title>
+  <link rel="stylesheet" href="../assets/site.css">
+</head>
+<body class="article-page">
+  <div class="reading-progress" id="readingProgress" aria-hidden="true"></div>
+
+  <header class="site-header">
+    <a class="wordmark" href="../" aria-label="Dale Yang home">DY<span>.</span></a>
+    <nav aria-label="Primary">
+      <a href="../sections/agent.html">Agent 探索</a>
+      <a href="https://github.com/yjd953">GitHub</a>
+    </nav>
+  </header>
+
+  <main class="article-layout">
+    <header class="article-masthead">
+      <a class="back-link" href="../sections/agent.html">← Agent 探索</a>
+      <p class="kicker">01.10 / Debugging / ZH</p>
+      <h1>Agent 为什么会调用错误的 Tool？</h1>
+      <p class="article-deck">从一次选错工具的真实式故障，建立 Prompt 到 Runtime Mapping 的排查路径。</p>
+    </header>
+
+    <article class="prose">
+      <p>一个线上诊断 Agent 收到问题：</p>
+<blockquote>
+<p>查一下 <code>payment-api</code> 最近 30 分钟为什么报错。</p>
+</blockquote>
+<p>系统有两个工具：</p>
+<pre><code class="language-text">search_logs  查询线上服务日志
+search_docs  搜索内部技术文档
+</code></pre>
+<p>模型却调用了 <code>search_docs(query=&quot;payment-api 最近 30 分钟报错&quot;)</code>，返回几篇过期故障复盘，最后给出错误结论。</p>
+<p>“模型不够聪明”不是可操作的分析。选错工具可能发生在 Prompt、描述、Schema、Context、模型决策或 Runtime Mapping 中，必须沿执行链定位。</p>
+<h2 id="section-先确认到底是谁错了">先确认：到底是谁错了</h2>
+<p>用户看到的是“调用了错误工具”，但至少存在三种情况：</p>
+<ol>
+<li>模型明确生成了 <code>search_docs</code>，属于选择错误；</li>
+<li>模型生成 <code>search_logs</code>，Adapter 却解析成 <code>search_docs</code>；</li>
+<li>Trace 显示 <code>search_logs</code>，Registry 实际映射到了文档搜索函数。</li>
+</ol>
+<p>第一步必须查看原始模型响应和 Runtime 事件：</p>
+<pre><code class="language-json">{
+  &quot;model_output&quot;: {
+    &quot;name&quot;: &quot;search_logs&quot;,
+    &quot;arguments&quot;: {
+      &quot;service&quot;: &quot;payment-api&quot;,
+      &quot;minutes&quot;: 30
+    }
+  },
+  &quot;resolved_tool&quot;: &quot;search_docs&quot;,
+  &quot;handler&quot;: &quot;docs.search&quot;
+}
+</code></pre>
+<p>这个例子里模型选对了，错误发生在 Runtime Mapping。若只看最终 Observation，就可能错误地去调 Prompt。</p>
+<h2 id="section-第一层prompt-是否制造了错误目标">第一层：Prompt 是否制造了错误目标</h2>
+<p>System Prompt 可能写着：</p>
+<pre><code class="language-text">优先使用内部知识库回答问题，避免昂贵的线上查询。
+</code></pre>
+<p>这条全局规则与当前“最近 30 分钟”的实时性要求冲突。模型选择文档并非随机，而是在服从更高优先级指令。</p>
+<p>排查 Prompt 时要看最终实际发送内容，而不是只看源模板：</p>
+<ul>
+<li>系统规则是否强调了错误优先级；</li>
+<li>用户目标是否被中间层重写；</li>
+<li>安全策略是否禁止了正确工具；</li>
+<li>Few-shot 示例是否总在相似问题上使用另一个工具；</li>
+<li>多语言表达是否让时间条件丢失。</li>
+</ul>
+<p>修复不一定是加一句“请使用 search_logs”。更好的规则是表达决策条件：</p>
+<pre><code class="language-text">涉及当前或指定时间范围内的运行状态，使用 search_logs。
+涉及操作方法、设计说明和历史复盘，使用 search_docs。
+</code></pre>
+<h2 id="section-第二层tool-description-是否可区分">第二层：Tool Description 是否可区分</h2>
+<p>原始描述可能是：</p>
+<pre><code class="language-text">search_logs: Search service information.
+search_docs: Search service information and documents.
+</code></pre>
+<p>两者几乎重叠。模型没有清晰特征可以区分，只能依据名称和训练偏好猜测。</p>
+<p>好的 Description 应包含四类信息：</p>
+<pre><code class="language-text">search_logs:
+Search runtime log events emitted by a service.
+Use for errors, requests, LogIDs, and behavior within a concrete time range.
+Do not use for design documents or operational instructions.
+
+search_docs:
+Search durable internal documents and historical postmortems.
+Use for architecture, runbooks, and explanations.
+It does not contain live service events.
+</code></pre>
+<p>描述不仅要说“它是什么”，还要说“什么时候用”和“什么时候不用”。对于容易混淆的工具，负面边界尤其重要。</p>
+<h2 id="section-第三层schema-是否让正确调用变难">第三层：Schema 是否让正确调用变难</h2>
+<p><code>search_logs</code> 的旧 Schema：</p>
+<pre><code class="language-json">{
+  &quot;properties&quot;: {
+    &quot;psm&quot;: {&quot;type&quot;: &quot;string&quot;},
+    &quot;start_ns&quot;: {&quot;type&quot;: &quot;integer&quot;},
+    &quot;end_ns&quot;: {&quot;type&quot;: &quot;integer&quot;},
+    &quot;dsl&quot;: {&quot;type&quot;: &quot;string&quot;}
+  },
+  &quot;required&quot;: [&quot;psm&quot;, &quot;start_ns&quot;, &quot;end_ns&quot;, &quot;dsl&quot;]
+}
+</code></pre>
+<p><code>search_docs</code> 只需要一个 <code>query</code>。即使模型知道应该查日志，也可能因为无法可靠计算纳秒时间戳和 DSL，转向参数更简单的工具。</p>
+<p>Tool Schema 是模型行动空间的一部分。可以把复杂转换留给 Runtime：</p>
+<pre><code class="language-json">{
+  &quot;properties&quot;: {
+    &quot;service&quot;: {&quot;type&quot;: &quot;string&quot;},
+    &quot;minutes&quot;: {
+      &quot;type&quot;: &quot;integer&quot;,
+      &quot;minimum&quot;: 1,
+      &quot;maximum&quot;: 120
+    },
+    &quot;keywords&quot;: {
+      &quot;type&quot;: &quot;array&quot;,
+      &quot;items&quot;: {&quot;type&quot;: &quot;string&quot;}
+    }
+  },
+  &quot;required&quot;: [&quot;service&quot;, &quot;minutes&quot;]
+}
+</code></pre>
+<p>底层 API 仍可以使用纳秒和 DSL，但不必把基础设施细节暴露给模型。</p>
+<h2 id="section-第四层context-是否污染了当前决策">第四层：Context 是否污染了当前决策</h2>
+<p>Agent 之前刚完成“搜索支付架构文档”的任务，Context 中有大量 <code>search_docs</code> 调用。新问题到来时，Runtime 没有正确切分 Run，模型延续了旧模式。</p>
+<p>Context 污染常见于：</p>
+<ul>
+<li>保留了上一个任务的 Tool Call 示例；</li>
+<li>历史 Observation 比当前用户目标更长、更显眼；</li>
+<li>Memory 召回了语义相似但场景不同的记录；</li>
+<li>工具错误信息诱导模型反复尝试错误工具；</li>
+<li>Summary 把“查实时日志”错误压缩成“查支付资料”。</li>
+</ul>
+<p>诊断时应保存 Context Manifest：</p>
+<pre><code class="language-json">{
+  &quot;system_prompt_version&quot;: &quot;agent-v12&quot;,
+  &quot;messages&quot;: [&quot;msg_101&quot;, &quot;msg_102&quot;],
+  &quot;memory_items&quot;: [&quot;mem_77&quot;],
+  &quot;knowledge_chunks&quot;: [&quot;doc_12&quot;],
+  &quot;tools&quot;: [&quot;search_logs@3&quot;, &quot;search_docs@2&quot;],
+  &quot;token_count&quot;: 18420
+}
+</code></pre>
+<p>这样才能重建模型到底看到了什么，而不是事后凭当前数据库内容猜测。</p>
+<h2 id="section-第五层模型决策本身可能不稳定">第五层：模型决策本身可能不稳定</h2>
+<p>即使 Prompt、描述和 Context 都合理，模型仍可能选错。Tool Selection 本质上是概率决策，受模型版本、温度、工具数量和名称影响。</p>
+<p>可以用固定输入做重复测试：</p>
+<pre><code class="language-text">同一 Case × 100 次
+期望 search_logs
+实际：
+  search_logs 93
+  search_docs  7
+</code></pre>
+<p>这说明问题不是确定性 Mapping Bug，而是决策边界不够稳。可采取：</p>
+<ul>
+<li>减少当前可见工具，只提供任务相关候选；</li>
+<li>合并高度重叠工具；</li>
+<li>改善名称、描述和 Schema；</li>
+<li>增加对比式示例；</li>
+<li>对明确意图先做确定性路由；</li>
+<li>对高风险动作增加二次判定或确认。</li>
+</ul>
+<p>不要仅靠把温度设为 0。确定性解码可以降低波动，但不会修正错误规则和歧义工具。</p>
+<h2 id="section-第六层runtime-mapping-是否一致">第六层：Runtime Mapping 是否一致</h2>
+<p>Registry 可能存在：</p>
+<pre><code class="language-python">REGISTRY = {
+    &quot;search_logs&quot;: docs_search_handler,  # 配置复制错误
+    &quot;search_docs&quot;: docs_search_handler,
+}
+</code></pre>
+<p>也可能是多版本发布不一致：</p>
+<pre><code class="language-text">模型看到：search_logs@v3 Schema
+Worker 执行：search_logs@v2 Handler
+</code></pre>
+<p>因此 Trace 中要同时记录：</p>
+<ul>
+<li>模型输出的原始 Tool Name；</li>
+<li>Runtime 解析后的规范名称；</li>
+<li>Registry 版本；</li>
+<li>Handler 标识与部署版本；</li>
+<li>实际下游 Endpoint；</li>
+<li>返回结果类型。</li>
+</ul>
+<p>Tool 名称相同不代表执行实现相同。没有版本信息时，灰度发布中的 Mapping 问题很难复现。</p>
+<h2 id="section-一个完整排查过程">一个完整排查过程</h2>
+<p>回到案例，团队按顺序检查：</p>
+<h3 id="section-1-重放用户输入">1. 重放用户输入</h3>
+<p>固定模型版本、Prompt 版本、工具集合和 Context，连续执行 30 次。<code>search_docs</code> 出现 11 次，证明问题可复现且不是单次偶然。</p>
+<h3 id="section-2-比较两个-tool-定义">2. 比较两个 Tool 定义</h3>
+<p>发现描述高度重叠，同时 <code>search_logs</code> 参数复杂。将真实线上状态、时间范围和负面边界写入描述，并简化 Schema。</p>
+<h3 id="section-3-做消融实验">3. 做消融实验</h3>
+<p>只提供 <code>search_logs</code> 时成功率 100%；同时提供两者时旧定义准确率 63%；新定义为 98%。这证明主要问题来自工具竞争，而不是模型无法理解用户目标。</p>
+<h3 id="section-4-检查-context">4. 检查 Context</h3>
+<p>错误样本中有一条历史 Memory：“payment-api 的错误处理记录在内部文档”。它与当前实时问题语义相似，被高分召回。加入时间意图过滤后不再注入。</p>
+<h3 id="section-5-检查执行映射">5. 检查执行映射</h3>
+<p>确认模型输出与 Handler 一致，排除 Registry Bug。</p>
+<h3 id="section-6-建立回归集">6. 建立回归集</h3>
+<p>新增成对 Case：</p>
+<pre><code class="language-text">“最近 30 分钟为什么报错” → search_logs
+“错误重试策略是怎么设计的” → search_docs
+“昨天 LogID xxx 的调用链” → search_logs
+“上次故障复盘有什么结论” → search_docs
+</code></pre>
+<p>最终修复不是一条更强硬的 Prompt，而是工具边界、Schema、Context 召回和评测共同收敛。</p>
+<h2 id="section-一套可复用的-tool-debug-顺序">一套可复用的 Tool Debug 顺序</h2>
+<p>出现错工具时，按下面顺序排查能减少猜测：</p>
+<pre><code class="language-text">1. Ground truth
+   正确工具真的是唯一合理选择吗？
+
+2. Raw model output
+   模型实际生成了什么？
+
+3. Prompt and visible tools
+   模型收到了哪些规则和候选？
+
+4. Description and schema
+   候选工具是否可区分、可调用？
+
+5. Context and memory
+   是否存在过期或冲突信息？
+
+6. Runtime mapping
+   名称是否映射到正确版本与 Handler？
+
+7. Execution result
+   工具是否正确执行，结果是否被误标？
+
+8. Repeated evaluation
+   问题是稳定错误还是概率性退化？
+</code></pre>
+<p>每一步都需要证据。只修改 Prompt 然后“感觉好多了”，无法防止下次模型升级或工具新增后回归。</p>
+<h2 id="section-tool-selection-是系统行为">Tool Selection 是系统行为</h2>
+<p>模型确实承担语义选择，但它的决策由整个系统塑造：</p>
+<pre><code class="language-text">用户表达
+× Prompt 规则
+× 可见工具集合
+× Description
+× Schema 可用性
+× Context
+× 模型版本
+× Runtime Mapping
+</code></pre>
+<p>所以“Agent 调错 Tool”很少只有一个原因。可靠的调试方法不是向模型追问“你为什么选错”，而是保存完整执行证据，对每一层做可重复实验，最后把失败样本固化为回归测试。</p>
+
+    </article>
+  </main>
+
+  <footer class="site-footer article-footer">
+    <a href="../sections/agent.html">Agent 探索 / 核心机制</a>
+    <a href="https://github.com/yjd953/yjd953/blob/main/posts/wrong-tool-selection.md">View source ↗</a>
+  </footer>
+  <script src="../assets/site.js" defer></script>
+</body>
+</html>

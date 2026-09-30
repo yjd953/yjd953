@@ -1,0 +1,293 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="沿 Go Source、AST、类型检查、SSA IR、汇编和机器码逐层追踪一条加法语句。">
+  <meta name="theme-color" content="#f1f1ee">
+  <title>一行 Go 代码是怎么变成 CPU 指令的？ — Dale Yang</title>
+  <link rel="stylesheet" href="../assets/site.css">
+</head>
+<body class="article-page">
+  <div class="reading-progress" id="readingProgress" aria-hidden="true"></div>
+
+  <header class="site-header">
+    <a class="wordmark" href="../" aria-label="Dale Yang home">DY<span>.</span></a>
+    <nav aria-label="Primary">
+      <a href="../sections/computer-systems.html">计算机底层</a>
+      <a href="https://github.com/yjd953">GitHub</a>
+    </nav>
+  </header>
+
+  <main class="article-layout">
+    <header class="article-masthead">
+      <a class="back-link" href="../sections/computer-systems.html">← 计算机底层</a>
+      <p class="kicker">02.03 / Compiler / ZH</p>
+      <h1>一行 Go 代码是怎么变成 CPU 指令的？</h1>
+      <p class="article-deck">沿 Go Source、AST、类型检查、SSA IR、汇编和机器码逐层追踪一条加法语句。</p>
+    </header>
+
+    <article class="prose">
+      <p>从这行开始：</p>
+<pre><code class="language-go">a += b
+</code></pre>
+<p>它在 Go 语义中表示读取 <code>a</code> 和 <code>b</code>，执行与类型相匹配的加法，再把结果赋回 <code>a</code>。CPU 不认识变量名和 <code>+=</code>，编译器必须逐层把它降为目标架构的机器指令。</p>
+<h2 id="section-先给代码一个完整上下文">先给代码一个完整上下文</h2>
+<pre><code class="language-go">package main
+
+func add(a, b int64) int64 {
+    a += b
+    return a
+}
+
+func main() {
+    println(add(40, 2))
+}
+</code></pre>
+<p>单独观察 <code>a += b</code> 时，很容易忽略上下文会改变结果：</p>
+<ul>
+<li><code>a</code>、<code>b</code> 是 <code>int64</code> 还是 <code>float64</code>；</li>
+<li>它们在寄存器、栈还是 Heap 对象里；</li>
+<li>函数是否被 Inline；</li>
+<li>参数是不是编译期常量；</li>
+<li>目标是 amd64 还是 arm64；</li>
+<li>是否开启优化。</li>
+</ul>
+<p>所以“一行 Go 对应哪条汇编”没有永恒唯一答案。编译器只需保证可观察行为符合 Go 规范。</p>
+<h2 id="section-第-1-层source-code-只是字节">第 1 层：Source Code 只是字节</h2>
+<p>编译器最初读到的是 UTF-8 文件内容：</p>
+<pre><code class="language-text">61 20 2b 3d 20 62
+ a     +  =     b
+</code></pre>
+<p>词法分析器把字符归类成 Token：</p>
+<pre><code class="language-text">IDENT(&quot;a&quot;)
+ADD_ASSIGN(&quot;+=&quot;)
+IDENT(&quot;b&quot;)
+</code></pre>
+<p>空格通常不再重要，标识符和操作符类别则被保留。词法阶段不知道 <code>a</code> 是整数，也不知道它是否已声明。</p>
+<h2 id="section-第-2-层parser-构造-ast">第 2 层：Parser 构造 AST</h2>
+<p>Parser 根据 Go 语法，把 Token 组合成 Abstract Syntax Tree。</p>
+<p>概念上：</p>
+<pre><code class="language-text">AssignStmt
+├─ Op: +=
+├─ Left:  Ident(&quot;a&quot;)
+└─ Right: Ident(&quot;b&quot;)
+</code></pre>
+<p>AST 保留源语言结构：这是赋值语句，左边是可写位置，右边是表达式。它比原始文本更适合后续分析，却仍然没有决定具体 CPU 指令。</p>
+<p>如果写成：</p>
+<pre><code class="language-go">a +=
+</code></pre>
+<p>Parser 就能在这一层发现语法不完整。它不需要等到生成机器码才报错。</p>
+<h2 id="section-第-3-层名称解析与类型检查赋予语义">第 3 层：名称解析与类型检查赋予语义</h2>
+<p>编译器查找 <code>a</code> 和 <code>b</code> 分别绑定到哪个声明，并确定类型。</p>
+<p>对于：</p>
+<pre><code class="language-go">func add(a, b int64) int64
+</code></pre>
+<p>它得到：</p>
+<pre><code class="language-text">a: int64
+b: int64
++: signed 64-bit integer addition
+result assigned back to a
+</code></pre>
+<p>这一层会拒绝：</p>
+<pre><code class="language-go">var a int64
+var b string
+a += b
+</code></pre>
+<p>因为不存在把 <code>string</code> 加到 <code>int64</code> 的合法运算。</p>
+<p>类型还决定溢出行为。普通无符号整数按模运算；有符号整数运算也使用二进制补码结果，不会像某些语言那样自动抛出溢出异常。</p>
+<h2 id="section-第-4-层编译器内部-ir-消除表面语法">第 4 层：编译器内部 IR 消除表面语法</h2>
+<p><code>a += b</code> 是语法糖，语义接近：</p>
+<pre><code class="language-go">a = a + b
+</code></pre>
+<p>编译器会把复杂 AST 降低为更接近执行的内部表示。概念上可能变成：</p>
+<pre><code class="language-text">t0 = Add64(a, b)
+a  = t0
+Return(a)
+</code></pre>
+<p>Go 编译器实际拥有多层内部结构，并会将函数转换到 SSA，Static Single Assignment，形式。SSA 要求每个值定义一次：</p>
+<pre><code class="language-text">a0 = Arg&lt;0&gt;
+b0 = Arg&lt;1&gt;
+a1 = Add64(a0, b0)
+Return(a1)
+</code></pre>
+<p>源码中的“修改变量 a”，在 SSA 中变成创建新值 <code>a1</code>。这让数据依赖显式化，优化器更容易判断一个值来自哪里、被谁使用。</p>
+<h2 id="section-第-5-层优化可能让源码消失">第 5 层：优化可能让源码消失</h2>
+<p>在 <code>main</code> 中：</p>
+<pre><code class="language-go">println(add(40, 2))
+</code></pre>
+<p>编译器可能 Inline <code>add</code>，再做常量传播：</p>
+<pre><code class="language-text">40 + 2 → 42
+</code></pre>
+<p>最终 <code>a += b</code> 不一定对应任何运行时加法。CPU 可能直接获得常量 42。</p>
+<p>为了观察真实加法，可以阻止内联：</p>
+<pre><code class="language-go">//go:noinline
+func add(a, b int64) int64 {
+    a += b
+    return a
+}
+</code></pre>
+<p>优化阶段还可能做：</p>
+<ul>
+<li>Dead Code Elimination；</li>
+<li>Bounds Check Elimination；</li>
+<li>Copy Propagation；</li>
+<li>Common Subexpression Elimination；</li>
+<li>Loop 优化；</li>
+<li>Escape Analysis 驱动的栈或 Heap 放置。</li>
+</ul>
+<p>编译器的任务不是逐行翻译，而是在保持语义的前提下生成更好的程序。</p>
+<h2 id="section-第-6-层从通用-ssa-到架构相关操作">第 6 层：从通用 SSA 到架构相关操作</h2>
+<p>SSA 中的 <code>Add64</code> 仍是抽象操作。后端根据目标架构选择指令。</p>
+<p>在 amd64 上，它可能选择 64 位整数加法；在 arm64 上选择另一种编码：</p>
+<pre><code class="language-text">通用 IR：Add64(a, b)
+
+amd64 → ADDQ
+arm64 → ADD
+</code></pre>
+<p>这一步通常被称为 Instruction Selection。随后还要做：</p>
+<ul>
+<li>寄存器分配；</li>
+<li>Spill 决策；</li>
+<li>指令调度；</li>
+<li>栈帧布局；</li>
+<li>Prologue / Epilogue 生成；</li>
+<li>GC Stack Map 生成。</li>
+</ul>
+<p>Go 程序还需要 Runtime 能识别哪些栈位置保存指针，以便 Garbage Collector 在 Safepoint 扫描。编译器输出的不只是 CPU 指令，还包括类型、栈图、重定位和调试元数据。</p>
+<h2 id="section-第-7-层go-assembly">第 7 层：Go Assembly</h2>
+<p>执行：</p>
+<pre><code class="language-bash">go build -gcflags=&#39;-S&#39; .
+</code></pre>
+<p>或者：</p>
+<pre><code class="language-bash">go tool compile -S main.go
+</code></pre>
+<p>在某个 Go 版本的 amd64 内部 ABI 下，<code>add</code> 可能接近：</p>
+<pre><code class="language-asm">TEXT main.add(SB), NOSPLIT|NOFRAME|ABIInternal
+    ADDQ BX, AX
+    RET
+</code></pre>
+<p>Go Assembly 使用 Plan 9 风格语法，操作数方向与 Intel 风格不同。这里可理解为：</p>
+<pre><code class="language-text">AX = AX + BX
+return AX
+</code></pre>
+<p>参数 <code>a</code>、<code>b</code> 被调用约定放入寄存器 <code>AX</code>、<code>BX</code>，返回值仍使用 <code>AX</code>。不同 Go 版本、架构和 ABI 可能使用不同位置，不要把示例寄存器当成语言规范。</p>
+<p>如果 <code>a</code> 是结构体字段：</p>
+<pre><code class="language-go">p.a += b
+</code></pre>
+<p>汇编还需要：</p>
+<pre><code class="language-text">计算 p.a 的地址
+→ 从内存读取
+→ 加 b
+→ 写回内存
+</code></pre>
+<p>如果多个 Goroutine 并发访问，它也不会自动原子。普通 <code>+=</code> 是读、改、写组合，需要锁或 <code>sync/atomic</code> 才能建立并发安全语义。</p>
+<h2 id="section-第-8-层assembler-把助记符编码成机器码">第 8 层：Assembler 把助记符编码成机器码</h2>
+<p>Go Assembler 将：</p>
+<pre><code class="language-asm">ADDQ BX, AX
+RET
+</code></pre>
+<p>编码成目标 ISA 的字节，并输出目标文件。目标文件中不仅有代码，还包括：</p>
+<ul>
+<li>符号；</li>
+<li>重定位项；</li>
+<li>只读数据；</li>
+<li>Go 类型和 GC 元数据；</li>
+<li>调试信息。</li>
+</ul>
+<p>机器码字节的具体值取决于指令形式和寄存器编码。可以让工具给出事实：</p>
+<pre><code class="language-bash">go tool objdump -s &#39;main\.add&#39; ./app
+</code></pre>
+<p>输出会同时显示地址、源代码行、机器字节和汇编指令。不要靠手工背编码判断实际二进制。</p>
+<h2 id="section-第-9-层linker-拼成可执行文件">第 9 层：Linker 拼成可执行文件</h2>
+<p>一个函数的目标代码还不是完整程序。Linker 需要：</p>
+<ul>
+<li>合并各 Package 的目标代码；</li>
+<li>解析函数和全局符号；</li>
+<li>处理重定位；</li>
+<li>删除不可达代码；</li>
+<li>布局 Text、Data、BSS 等段；</li>
+<li>加入 Go Runtime；</li>
+<li>写出 ELF、Mach-O 或 PE 可执行文件。</li>
+</ul>
+<p>Go 常见构建会把大量 Runtime 代码链接进二进制。程序启动后，真正进入 <code>main.main</code> 之前，Runtime 已建立调度器、内存管理、GC 和初始 Goroutine 所需环境。</p>
+<p>因此 Go 的 <code>main</code> 同样不是操作系统直接调用的第一段代码。</p>
+<h2 id="section-第-10-层loader-把机器码映射进进程">第 10 层：Loader 把机器码映射进进程</h2>
+<p>执行 <code>./app</code> 后，操作系统读取可执行文件头，建立虚拟地址空间，将代码段映射为可执行页面。</p>
+<p>CPU 的指令指针最终到达 <code>main.add</code> 的机器码地址。假设：</p>
+<pre><code class="language-text">AX = 40
+BX = 2
+</code></pre>
+<p>CPU 对 <code>ADDQ BX, AX</code> 的架构效果是：</p>
+<pre><code class="language-text">读取 AX
+读取 BX
+执行 64 位加法
+结果 42 写回 AX
+更新相关状态标志
+前进到下一条指令
+</code></pre>
+<p><code>RET</code> 再根据调用约定恢复返回地址，回到调用者。</p>
+<p>CPU 不知道这是 Go，也不知道 <code>a</code> 曾经是一个源代码变量。Go 语义已经被压缩进机器指令、内存布局和 Runtime 约定。</p>
+<h2 id="section-一行代码经历的完整链路">一行代码经历的完整链路</h2>
+<pre><code class="language-text">Go Source
+  a += b
+    ↓ Lexer / Parser
+AST
+  Add-Assign(a, b)
+    ↓ Name Resolution / Type Check
+Typed operation
+  signed int64 addition
+    ↓ Lowering
+IR / SSA
+  a1 = Add64(a0, b0)
+    ↓ Optimization
+optimized SSA
+    ↓ Instruction Selection
+architecture-specific operations
+    ↓ Register Allocation
+AX / BX assignment
+    ↓ Assembly
+ADDQ BX, AX
+    ↓ Assembler
+Machine Code bytes
+    ↓ Linker / Loader
+Executable memory page
+    ↓ CPU
+register state transition
+</code></pre>
+<h2 id="section-用编译器自己回答">用编译器自己回答</h2>
+<p>可以用这组命令观察：</p>
+<pre><code class="language-bash">go build -gcflags=&#39;-S -N -l&#39; -o app .
+go tool objdump -s &#39;main\.add&#39; ./app
+go build -gcflags=&#39;-m=2&#39; .
+</code></pre>
+<p>其中：</p>
+<ul>
+<li><code>-S</code> 输出汇编；</li>
+<li><code>-N</code> 关闭多数优化；</li>
+<li><code>-l</code> 关闭内联；</li>
+<li><code>-m=2</code> 展示内联与 Escape Analysis 决策。</li>
+</ul>
+<p>再去掉 <code>-N -l</code> 比较，会看到优化如何改变甚至消除源码结构。</p>
+<h2 id="section-编译不是逐字翻译">编译不是逐字翻译</h2>
+<p><code>a += b</code> 从来不是被机械替换成固定指令。它先获得类型和作用域语义，再被降低为数据流，经过优化、指令选择与寄存器分配，最终成为某种架构上的状态变化。</p>
+<p>真正稳定的不是某条汇编，而是每一层维护的契约：</p>
+<pre><code class="language-text">Go 规范定义源码语义
+IR 保存可优化的数据依赖
+后端遵循目标 ISA
+ABI 约定参数与返回值位置
+操作系统映射可执行文件
+CPU 实现机器指令效果
+</code></pre>
+<p>一行高级语言能跨越这些层，是因为每一层都隐藏了下一层的复杂性，同时保留了上一层要求的可观察结果。</p>
+
+    </article>
+  </main>
+
+  <footer class="site-footer article-footer">
+    <a href="../sections/computer-systems.html">计算机底层 / 代码如何运行</a>
+    <a href="https://github.com/yjd953/yjd953/blob/main/posts/go-source-to-machine-code.md">View source ↗</a>
+  </footer>
+  <script src="../assets/site.js" defer></script>
+</body>
+</html>

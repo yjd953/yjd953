@@ -1,0 +1,540 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="设计写入后断电实验，连接 Log、Flush、Commit、Checkpoint 与崩溃恢复。">
+  <meta name="theme-color" content="#f1f1ee">
+  <title>数据库为什么需要 WAL？ — Dale Yang</title>
+  <link rel="stylesheet" href="../assets/site.css">
+</head>
+<body class="article-page">
+  <div class="reading-progress" id="readingProgress" aria-hidden="true"></div>
+
+  <header class="site-header">
+    <a class="wordmark" href="../" aria-label="Dale Yang home">DY<span>.</span></a>
+    <nav aria-label="Primary">
+      <a href="../sections/computer-systems.html">计算机底层</a>
+      <a href="https://github.com/yjd953">GitHub</a>
+    </nav>
+  </header>
+
+  <main class="article-layout">
+    <header class="article-masthead">
+      <a class="back-link" href="../sections/computer-systems.html">← 计算机底层</a>
+      <p class="kicker">02.15 / Database recovery / ZH</p>
+      <h1>数据库为什么需要 WAL？</h1>
+      <p class="article-deck">设计写入后断电实验，连接 Log、Flush、Commit、Checkpoint 与崩溃恢复。</p>
+    </header>
+
+    <article class="prose">
+      <p>执行一个事务：</p>
+<pre><code class="language-sql">BEGIN;
+UPDATE accounts SET balance = balance - 100 WHERE id = 1;
+UPDATE accounts SET balance = balance + 100 WHERE id = 2;
+COMMIT;
+</code></pre>
+<p>现在在不同时间点突然断电：</p>
+<pre><code class="language-text">A. 两条 UPDATE 之前
+B. 第一条 UPDATE 之后
+C. 两条 UPDATE 之后、COMMIT 之前
+D. COMMIT 返回之前
+E. COMMIT 已返回，但数据页还没写完
+F. 所有数据页写完之后
+</code></pre>
+<p>数据库重启后必须给出清晰答案：</p>
+<ul>
+<li>如果客户端已经得到成功，转账不能消失；</li>
+<li>如果事务没有提交，不能只扣款不入账；</li>
+<li>数据文件中即使混有新旧 Page，也必须恢复到一致状态；</li>
+<li>恢复过程再次崩溃，下一次仍然应能继续。</li>
+</ul>
+<p>WAL，Write-Ahead Log，就是数据库在断电前留下的恢复证据。它不是普通业务日志，也不只是“把 SQL 再记一遍”。</p>
+<h2 id="section-先看不用-wal-的两种极端">先看不用 WAL 的两种极端</h2>
+<h3 id="section-方案一只改内存">方案一：只改内存</h3>
+<pre><code class="language-text">UPDATE
+→ modify pages in RAM
+→ COMMIT success
+→ write pages later
+</code></pre>
+<p>性能很好，但断电后 RAM 消失。客户端看到成功的事务可能完全丢失，违反 Durability。</p>
+<h3 id="section-方案二提交前强制写完所有数据页">方案二：提交前强制写完所有数据页</h3>
+<pre><code class="language-text">UPDATE
+→ write every changed data page
+→ wait until all are durable
+→ COMMIT success
+</code></pre>
+<p>这叫 Force 思路，但仍有问题：</p>
+<ul>
+<li>一次事务可能修改许多随机 Page；</li>
+<li>每个索引都可能产生额外 Page；</li>
+<li>多页写没有通用的整体原子性；</li>
+<li>中途断电会留下部分新、部分旧；</li>
+<li>同一热页会被重复写很多次；</li>
+<li>大事务的提交延迟与写入量成正比。</li>
+</ul>
+<p>WAL 选择第三条路：</p>
+<pre><code class="language-text">先顺序持久化足够恢复的日志
+→ 提交可以返回
+→ 数据页以后再批量写
+</code></pre>
+<h2 id="section-wal-的两个基本规则">WAL 的两个基本规则</h2>
+<p>不同数据库算法细节不同，但经典 WAL 至少依赖两个顺序约束。</p>
+<h3 id="section-规则一数据页之前先有日志">规则一：数据页之前先有日志</h3>
+<p>如果某个 Page 包含 LSN <code>120</code> 的修改，那么它写入持久化数据文件之前，WAL 至少要持久到 <code>120</code>：</p>
+<pre><code class="language-text">durable_wal_lsn &gt;= page_lsn
+</code></pre>
+<p>这保证任何已经进入数据文件的新变化，都有对应日志可以解释。</p>
+<h3 id="section-规则二提交成功之前先持久化-commit">规则二：提交成功之前先持久化 Commit</h3>
+<p>数据库对客户端返回成功之前，与该事务提交相关的 WAL 必须达到配置承诺的持久化边界：</p>
+<pre><code class="language-text">flush WAL through transaction commit LSN
+→ then acknowledge COMMIT
+</code></pre>
+<p>若配置为异步提交，这条契约会放宽：数据库可能先返回，近期提交在 OS 或机器崩溃时丢失。那是有意选择不同 Durability，而不是 WAL 自动失效。</p>
+<h2 id="section-wal-record-记录什么">WAL Record 记录什么</h2>
+<p>一条日志记录可抽象为：</p>
+<pre><code class="language-text">LSN
+record type
+transaction ID
+affected page / object
+redo information
+undo information or previous-version reference, if used
+previous LSN in this transaction
+length
+checksum
+</code></pre>
+<p>LSN，Log Sequence Number，是日志流中的单调位置。它让数据库回答：</p>
+<pre><code class="language-text">这条记录之前有哪些日志？
+某个 Page 已经包含到哪个日志位置？
+持久化设备上的 WAL 已写到哪里？
+恢复应该从哪里开始？
+</code></pre>
+<p>日志可以有不同粒度：</p>
+<h3 id="section-physical-logging">Physical Logging</h3>
+<p>记录 Page 中具体字节或结构如何变化：</p>
+<pre><code class="language-text">page 18, offset 312: old bytes → new bytes
+</code></pre>
+<p>恢复直接，日志可能较大，且与存储格式耦合。</p>
+<h3 id="section-logical-logging">Logical Logging</h3>
+<p>记录逻辑操作：</p>
+<pre><code class="language-text">insert key=42 into users
+</code></pre>
+<p>更抽象，但重放时要重新执行更复杂的逻辑，并处理并发与确定性问题。</p>
+<h3 id="section-physiological-logging">Physiological Logging</h3>
+<p>用 Page 标识定位范围，在 Page 内记录逻辑操作，例如“在这个 B+Tree Page 插入一条 Key”。很多数据库采用混合方式。</p>
+<p>WAL 通常不是简单保存原始 SQL。SQL 可能依赖当时的执行计划、随机函数、触发器、外部状态和并发顺序，直接重跑不一定得到相同物理结果。</p>
+<h2 id="section-一次-update-如何产生-wal">一次 UPDATE 如何产生 WAL</h2>
+<p>用简化模型追踪扣款：</p>
+<pre><code class="language-text">T42 begins
+→ find account 1 page in Buffer Pool
+→ acquire needed lock/latch
+→ create WAL record LSN=100: balance 500 → 400
+→ apply change to in-memory page
+→ page_lsn = 100
+→ mark page dirty
+</code></pre>
+<p>入账：</p>
+<pre><code class="language-text">→ create WAL record LSN=140: balance 200 → 300
+→ apply change to another in-memory page
+→ page_lsn = 140
+→ mark page dirty
+</code></pre>
+<p>提交：</p>
+<pre><code class="language-text">→ append COMMIT record LSN=170
+→ flush WAL through 170
+→ report COMMIT success
+</code></pre>
+<p>此时数据文件可能仍是：</p>
+<pre><code class="language-text">account 1 = 500
+account 2 = 200
+</code></pre>
+<p>这并不表示提交是假的。持久 WAL 已包含足够信息，让重启后恢复：</p>
+<pre><code class="language-text">account 1 = 400
+account 2 = 300
+</code></pre>
+<p>数据库承诺的是可恢复的持久状态，不是每次提交都立即把所有最终数据页放到固定物理位置。</p>
+<h2 id="section-log-buffer-与-wal-file">Log Buffer 与 WAL File</h2>
+<p>日志通常先进入内存 Log Buffer：</p>
+<pre><code class="language-text">transaction threads
+→ reserve WAL space
+→ encode records
+→ append to log buffer
+</code></pre>
+<p>随后写入 WAL File：</p>
+<pre><code class="language-text">log buffer
+→ write / pwrite
+→ OS Page Cache, if buffered
+→ filesystem
+→ block device
+→ storage cache / non-volatile media
+</code></pre>
+<p><code>write()</code> 返回并不自动等于持久化。数据库还要使用 <code>fsync()</code>、<code>fdatasync()</code>、<code>O_DSYNC</code>、Direct I/O 加 Flush/FUA 等机制，具体取决于实现和平台。</p>
+<p>所谓 <code>durable_lsn</code> 不能只看数据库已经调用了几次 <code>write()</code>，而要看它等待到哪个持久化保证。</p>
+<h2 id="section-为什么-wal-更适合提交关键路径">为什么 WAL 更适合提交关键路径</h2>
+<p>假设事务改变 20 个分散数据页。如果直接强制这些 Page：</p>
+<pre><code class="language-text">20 random page writes
+possibly 20 different file regions
+must all become durable
+</code></pre>
+<p>WAL 可以编码成相对连续的追加：</p>
+<pre><code class="language-text">several compact records
+→ append to current WAL segment
+→ one flush boundary
+</code></pre>
+<p>顺序追加的优势不只适用于机械硬盘。对 SSD 而言，它也减少数据库层随机 I/O 和同步次数，并更容易：</p>
+<ul>
+<li>Batch；</li>
+<li>Group Commit；</li>
+<li>连续预分配；</li>
+<li>Replication；</li>
+<li>校验与顺序扫描。</li>
+</ul>
+<p>WAL 不是零成本。它让同一逻辑变化至少写日志和数据页两次，产生写放大。数据库接受这个成本，是为了换取可恢复性和更低的前台同步成本。</p>
+<h2 id="section-group-commit一次-flush-提交多个事务">Group Commit：一次 Flush 提交多个事务</h2>
+<p>三个事务依次生成：</p>
+<pre><code class="language-text">T1 commit at LSN 200
+T2 commit at LSN 240
+T3 commit at LSN 290
+</code></pre>
+<p>只要一次 Flush 让：</p>
+<pre><code class="language-text">durable_lsn = 290
+</code></pre>
+<p>三个事务都满足持久化条件。</p>
+<pre><code class="language-text">T1 ─┐
+T2 ─┼→ one WAL flush → wake all
+T3 ─┘
+</code></pre>
+<p>这样固定的设备同步延迟由多个并发事务分摊。高并发下，略微等待形成批次，反而可能提升总体吞吐，但会影响单事务 Tail Latency。</p>
+<h2 id="section-no-force-为什么要求-redo">No-Force 为什么要求 Redo</h2>
+<p>No-Force 表示提交时不强制所有数据页落盘。</p>
+<pre><code class="language-text">COMMIT durable
+data page still dirty in RAM
+</code></pre>
+<p>崩溃后数据文件缺少已提交修改，所以恢复必须 Redo：</p>
+<pre><code class="language-text">if page_lsn &lt; record_lsn:
+    apply redo
+    page_lsn = record_lsn
+</code></pre>
+<p>Page LSN 让 Redo 具备幂等判断。若 Page 已经包含该修改，就跳过；若没有，就应用。</p>
+<p>因此恢复过程中再次崩溃也不是灾难。重启后再次扫描，已写回的 Page 会跳过，未写回的继续 Redo。真实算法还会使用更严格的记录格式、校验和恢复状态。</p>
+<h2 id="section-steal-为什么要求-undo-或可见性控制">Steal 为什么要求 Undo 或可见性控制</h2>
+<p>Buffer Pool 空间有限。事务尚未提交时，它修改的 Dirty Page 也可能被选中写回：</p>
+<pre><code class="language-text">uncommitted T42 changes
+→ data page reaches disk
+→ T42 aborts or system crashes
+</code></pre>
+<p>允许这种行为叫 Steal。它避免长事务占住大量 Buffer Frame，但意味着数据文件中可能包含未提交变化。</p>
+<p>经典恢复算法会在重启时 Undo 未提交事务：</p>
+<pre><code class="language-text">find loser transactions
+→ traverse their log chains backward
+→ apply undo
+→ record compensation log records
+</code></pre>
+<p>但不同数据库实现不完全相同：</p>
+<ul>
+<li>ARIES 风格算法明确执行 Analysis、Redo、Undo；</li>
+<li>InnoDB 先用 Redo 恢复 Page，再用 Undo 信息回滚未提交事务；</li>
+<li>PostgreSQL 的 MVCC Tuple 带事务可见性信息，崩溃恢复重放 WAL 后，未提交 Tuple 对正常查询不可见，后续由清理机制回收，通常不是简单把每条数据物理 Undo 回旧字节。</li>
+</ul>
+<p>所以“WAL 一定同时保存旧值并逐条 Undo”不是普遍规则。数据库必须保证未提交结果不可见，但实现可以是物理 Undo、版本可见性或其他机制。</p>
+<h2 id="section-force-steal-组合决定恢复需求">Force / Steal 组合决定恢复需求</h2>
+<div class="table-scroll"><table>
+<thead>
+<tr>
+<th>Buffer Policy</th>
+<th>含义</th>
+<th>恢复需求</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Force</td>
+<td>Commit 时写完该事务数据页</td>
+<td>通常减少 Redo 需求，提交昂贵</td>
+</tr>
+<tr>
+<td>No-Force</td>
+<td>Commit 后数据页可仍在内存</td>
+<td>需要 Redo 已提交变化</td>
+</tr>
+<tr>
+<td>No-Steal</td>
+<td>未提交脏页不能写回</td>
+<td>减少 Undo 需求，内存压力大</td>
+</tr>
+<tr>
+<td>Steal</td>
+<td>未提交脏页允许写回</td>
+<td>需要 Undo 或等价可见性控制</td>
+</tr>
+</tbody></table></div>
+<p>高性能通用数据库通常倾向于 Steal + No-Force，因为它允许灵活管理 Buffer Pool，并把随机数据页写移出提交路径。代价是恢复协议更复杂。</p>
+<h2 id="section-commit-record-是事实边界">Commit Record 是事实边界</h2>
+<p>恢复时不能仅凭“看见两条数据修改日志”判断事务已经提交。系统可能在写完修改日志后、写 Commit Record 前崩溃。</p>
+<pre><code class="language-text">LSN 100: T42 debit
+LSN 140: T42 credit
+power loss
+</code></pre>
+<p>没有有效持久的 Commit Record，T42 不能被当作已提交事务。</p>
+<p>如果日志尾部只写了一半：</p>
+<pre><code class="language-text">LSN 170: COMMI...
+</code></pre>
+<p>恢复程序通过长度、边界、Checksum、Page/Segment 结构等识别不完整尾部。它不能把“看起来像 COMMIT 的几个字节”当成有效提交。</p>
+<p>事务的真正持久提交点因此可以定义为：</p>
+<pre><code class="language-text">包含该事务 Commit Record 的 WAL 前缀
+已经完整、按序地到达持久化边界
+</code></pre>
+<h2 id="section-checkpoint-不是清空-wal">Checkpoint 不是“清空 WAL”</h2>
+<p>没有 Checkpoint，恢复可能从数据库创建之初扫描所有 WAL。</p>
+<p>Checkpoint 建立一个较新的恢复基准，通常涉及：</p>
+<ul>
+<li>记录当前活跃事务与恢复所需状态；</li>
+<li>推动或调度 Dirty Page 写回；</li>
+<li>记录 Checkpoint WAL Record；</li>
+<li>更新控制信息；</li>
+<li>在确认旧日志不再被恢复、复制、归档等需要后回收。</li>
+</ul>
+<p>Checkpoint 时数据库仍可能继续处理事务，因此它不是简单的“暂停世界，把所有内容刷干净”。</p>
+<p>其核心目标是限制：</p>
+<pre><code class="language-text">crash recovery must scan from where?
+how much WAL must be retained?
+how many dirty pages may need redo?
+</code></pre>
+<p>Checkpoint 太密会制造大量数据页写入；太疏会延长恢复并增加 WAL 空间。成熟数据库会平滑后台 I/O，避免集中 Flush 形成周期性延迟尖峰。</p>
+<h2 id="section-一个简化的崩溃恢复过程">一个简化的崩溃恢复过程</h2>
+<p>以 ARIES 思想为例，可以理解为三个阶段。</p>
+<h3 id="section-analysis">Analysis</h3>
+<p>从 Checkpoint 附近扫描日志，重建：</p>
+<ul>
+<li>崩溃时哪些事务仍活跃；</li>
+<li>哪些 Page 可能是 Dirty；</li>
+<li>Redo 最早需要从哪里开始。</li>
+</ul>
+<p>将事务分为：</p>
+<pre><code class="language-text">Winner: committed
+Loser: active but not committed at crash
+</code></pre>
+<h3 id="section-redo">Redo</h3>
+<p>重复历史，确保日志描述过的必要 Page 变化已经反映到数据文件：</p>
+<pre><code class="language-text">for each redoable record:
+    if page does not already contain record:
+        redo it
+</code></pre>
+<p>这里甚至可能先重做 Loser 的变化，因为目标是恢复出“崩溃瞬间的物理状态”，再统一处理未提交事务。</p>
+<h3 id="section-undo">Undo</h3>
+<p>逆向遍历 Loser 的日志链，撤销它们：</p>
+<pre><code class="language-text">last_lsn
+→ prev_lsn
+→ prev_lsn
+→ ...
+</code></pre>
+<p>Undo 本身写 Compensation Log Record。这样若恢复过程中再次崩溃，系统知道哪些撤销已经完成，不会无依据地重复。</p>
+<p>这是一种经典模型，不代表所有数据库都逐字采用 ARIES。</p>
+<h2 id="section-断电实验先建立崩溃矩阵">断电实验：先建立崩溃矩阵</h2>
+<p>在实验前先定义预期。设 T1 把账户从：</p>
+<pre><code class="language-text">A=500, B=200
+</code></pre>
+<p>改为：</p>
+<pre><code class="language-text">A=400, B=300
+</code></pre>
+<div class="table-scroll"><table>
+<thead>
+<tr>
+<th>断电点</th>
+<th>持久 WAL</th>
+<th>数据页可能状态</th>
+<th>恢复后允许结果</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>UPDATE 前</td>
+<td>无 T1</td>
+<td>旧</td>
+<td>旧</td>
+</tr>
+<tr>
+<td>两条 UPDATE 后、COMMIT 前</td>
+<td>有修改记录，无有效 Commit</td>
+<td>旧、部分新或全新</td>
+<td>T1 不可见</td>
+</tr>
+<tr>
+<td>Commit Record 写入但未 Flush</td>
+<td>持久前缀未必含 Commit</td>
+<td>任意混合</td>
+<td>不能承诺保留</td>
+</tr>
+<tr>
+<td>Commit Flush 后、响应前</td>
+<td>含完整 Commit</td>
+<td>任意混合</td>
+<td>新；客户端可能不知道结果</td>
+</tr>
+<tr>
+<td>COMMIT 成功响应后</td>
+<td>含完整 Commit</td>
+<td>任意混合</td>
+<td>新</td>
+</tr>
+<tr>
+<td>Checkpoint/数据页完成后</td>
+<td>含 Commit 或已可回收</td>
+<td>新</td>
+<td>新</td>
+</tr>
+</tbody></table></div>
+<p>最棘手的是：</p>
+<pre><code class="language-text">Commit 已持久，但成功响应在网络中丢失
+</code></pre>
+<p>数据库必须保留事务，因为它已提交；客户端却不知道结果。应用需要 Idempotency Key、事务查询或业务唯一约束处理这种“结果未知”，不能要求数据库悄悄回滚一个已提交事务。</p>
+<h2 id="section-实验一观察进程崩溃恢复">实验一：观察进程崩溃恢复</h2>
+<p>可以在一次性 PostgreSQL 测试实例中进行，不要对生产库操作。</p>
+<p>准备数据：</p>
+<pre><code class="language-sql">CREATE TABLE accounts (
+  id bigint PRIMARY KEY,
+  balance bigint NOT NULL
+);
+
+INSERT INTO accounts VALUES (1, 500), (2, 200);
+CHECKPOINT;
+</code></pre>
+<p>执行并提交：</p>
+<pre><code class="language-sql">BEGIN;
+UPDATE accounts SET balance = balance - 100 WHERE id = 1;
+UPDATE accounts SET balance = balance + 100 WHERE id = 2;
+COMMIT;
+</code></pre>
+<p>记录 WAL 位置：</p>
+<pre><code class="language-sql">SELECT pg_current_wal_lsn();
+</code></pre>
+<p>随后让数据库进程异常退出并重启，再查询：</p>
+<pre><code class="language-sql">SELECT * FROM accounts ORDER BY id;
+</code></pre>
+<p>正确配置下，已同步提交事务应保留。</p>
+<p>但要明确：</p>
+<blockquote>
+<p><code>kill -9</code> 只模拟数据库进程崩溃，不等于机器突然断电。</p>
+</blockquote>
+<p>操作系统 Page Cache 和设备缓存仍然存在，内核甚至可能继续后台写回。这个实验能观察 Recovery，却不能严格验证 Power-Loss Durability。</p>
+<h2 id="section-实验二真正接近断电">实验二：真正接近断电</h2>
+<p>更合理的实验环境是一次性虚拟机或专用测试机：</p>
+<pre><code class="language-text">Host
+└─ disposable VM
+   └─ database + test data volume
+</code></pre>
+<p>步骤：</p>
+<ol>
+<li>确认数据库启用同步提交、<code>fsync</code> 和必要的 Full-Page Protection；</li>
+<li>循环提交带连续 ID 与 Checksum 的事务；</li>
+<li>在随机时间从 VM 外部强制断电，而不是优雅关机；</li>
+<li>重新启动 VM 和数据库；</li>
+<li>检查数据库 Recovery Log；</li>
+<li>验证已收到成功响应的事务全部存在；</li>
+<li>验证每个事务的多行约束没有部分生效；</li>
+<li>重复数百次，并记录最后确认 ID。</li>
+</ol>
+<p>事务表可设计为：</p>
+<pre><code class="language-sql">CREATE TABLE durability_probe (
+  tx_id bigint PRIMARY KEY,
+  left_value bigint NOT NULL,
+  right_value bigint NOT NULL,
+  checksum bigint NOT NULL
+);
+</code></pre>
+<p>每次事务还在外部客户端 Durable Journal 记录：</p>
+<pre><code class="language-text">request_sent
+commit_success_received
+</code></pre>
+<p>重启后按三类比较：</p>
+<pre><code class="language-text">success received → 必须存在
+failure received → 依错误语义判断
+connection lost  → 结果未知，允许存在或不存在，但不能部分存在
+</code></pre>
+<p>不要在日常电脑或重要磁盘上直接拔电源做实验。真实 Power-Fail 测试还要控制宿主机、虚拟磁盘 Cache Mode、存储控制器与云盘语义，否则测试到的可能只是某层模拟行为。</p>
+<h2 id="section-fsyncoff-为什么能制造错误安全感"><code>fsync=off</code> 为什么能制造错误安全感</h2>
+<p>为了跑分关闭持久化选项：</p>
+<pre><code class="language-text">fsync = off
+synchronous_commit = off
+unsafe device write cache
+</code></pre>
+<p>常会显著提高吞吐，因为昂贵的稳定存储等待被移除了。但此时：</p>
+<pre><code class="language-text">COMMIT success
+≠ WAL reached non-volatile storage
+</code></pre>
+<p>正常关闭或 <code>kill -9</code> 测试可能一直通过，因为数据还在 OS Page Cache，稍后被写入。只有真正丢失易失缓存时，风险才显现。</p>
+<p>所以“我杀了进程一百次都没丢数据”不能证明断电安全。</p>
+<h2 id="section-page-tear-为什么-wal-还需要额外机制">Page Tear 为什么 WAL 还需要额外机制</h2>
+<p>假设 8KiB 数据页原值为 P0，数据库要写 P1。设备只保证更小单位原子性，断电后可能得到：</p>
+<pre><code class="language-text">first 4KiB from P1
+last 4KiB from P0
+</code></pre>
+<p>如果 WAL 只记录“在 Offset 120 修改 8 Bytes”，它可能无法在结构已经撕裂的 Page 上安全重做。</p>
+<p>不同数据库采用不同保护：</p>
+<ul>
+<li>PostgreSQL 在 Checkpoint 后首次修改 Page 时可记录 Full-Page Image；</li>
+<li>InnoDB 使用 Doublewrite 等机制保护 Torn Page，再应用 Redo；</li>
+<li>文件系统或存储可能提供更强的 Atomic Write 能力，但必须明确验证契约；</li>
+<li>Page Checksum 帮助检测损坏，但检测本身不等于修复。</li>
+</ul>
+<p>WAL 解决“有哪些修改、顺序与提交状态”，而 Torn Page Protection 解决“恢复的基础 Page 是否完整可用”。两者相关但不相同。</p>
+<h2 id="section-wal-还支撑复制与时间点恢复">WAL 还支撑复制与时间点恢复</h2>
+<p>同一条有序日志流可用于：</p>
+<h3 id="section-physical-replication">Physical Replication</h3>
+<pre><code class="language-text">Primary WAL
+→ stream to Replica
+→ replay in LSN order
+</code></pre>
+<p>同步复制还可以把 Commit 条件扩展为：</p>
+<pre><code class="language-text">local WAL durable
++ required replica acknowledgment
+</code></pre>
+<p>确认的是 Replica 已接收、写入、Flush 还是 Apply，取决于配置。</p>
+<h3 id="section-point-in-time-recovery">Point-in-Time Recovery</h3>
+<pre><code class="language-text">base backup
++ archived WAL
+→ replay until target time / LSN / transaction
+</code></pre>
+<p>备份只提供一个基线，后续 WAL 把状态推进到目标点。</p>
+<h3 id="section-change-data-capture">Change Data Capture</h3>
+<p>Logical Decoding 或 Binlog 类机制可从变更流产生下游事件。但数据库内部 Recovery WAL 与面向业务的 Logical Change Stream 不应直接混为同一个抽象，它们的格式、保留和兼容性要求不同。</p>
+<h2 id="section-wal-不能独自保证一切">WAL 不能独自保证一切</h2>
+<p>WAL 的正确性依赖整条栈：</p>
+<pre><code class="language-text">database ordering
+→ OS syscall semantics
+→ filesystem ordering
+→ block layer
+→ hypervisor / cloud volume
+→ controller cache
+→ non-volatile media
+</code></pre>
+<p>以下情况都可能破坏承诺：</p>
+<ul>
+<li>数据库错误配置；</li>
+<li>文件系统或设备不正确实现 Flush；</li>
+<li>虚拟化层谎报完成；</li>
+<li>存储固件 Bug；</li>
+<li>WAL 文件损坏且没有可用副本；</li>
+<li>应用误解异步提交的语义；</li>
+<li>复制确认级别低于业务要求。</li>
+</ul>
+<p>WAL 是恢复协议的核心，但不是魔法。持久化是端到端属性。</p>
+<h2 id="section-最终答案">最终答案</h2>
+<p>数据库需要 WAL，因为事务的逻辑原子性，不能直接由多次普通数据页写的物理原子性获得。</p>
+<p>WAL 先把变化与提交事实写成一条有序、可校验、可持久化的日志。只要 Commit Record 已按承诺落到稳定存储，即使数据页仍是旧的、只写了一部分，数据库也能在重启时 Redo 已提交修改；对于未提交修改，则通过 Undo、MVCC 可见性或引擎自己的恢复机制保证它们不对外生效。</p>
+<p>它把提交条件从：</p>
+<pre><code class="language-text">所有最终数据页现在必须全部写完
+</code></pre>
+<p>改写为：</p>
+<pre><code class="language-text">足以重建正确状态的日志前缀现在必须持久
+</code></pre>
+<p>这条转换同时带来原子恢复、顺序写、Group Commit 和后台刷页。数据库重启后之所以知道哪些数据应该保留，不是因为它猜测数据文件哪个 Page 更新得更晚，而是因为 WAL 中保留了修改顺序、事务边界和可验证的 Commit 事实。</p>
+
+    </article>
+  </main>
+
+  <footer class="site-footer article-footer">
+    <a href="../sections/computer-systems.html">计算机底层 / 存储与数据库</a>
+    <a href="https://github.com/yjd953/yjd953/blob/main/posts/database-wal.md">View source ↗</a>
+  </footer>
+  <script src="../assets/site.js" defer></script>
+</body>
+</html>

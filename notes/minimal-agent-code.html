@@ -1,0 +1,343 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="从几十行循环开始，逐步加入 Memory、Retry、Timeout 与并行工具调用。">
+  <meta name="theme-color" content="#f1f1ee">
+  <title>一个 Agent 最少需要多少代码？ — Dale Yang</title>
+  <link rel="stylesheet" href="../assets/site.css">
+</head>
+<body class="article-page">
+  <div class="reading-progress" id="readingProgress" aria-hidden="true"></div>
+
+  <header class="site-header">
+    <a class="wordmark" href="../" aria-label="Dale Yang home">DY<span>.</span></a>
+    <nav aria-label="Primary">
+      <a href="../sections/agent.html">Agent 探索</a>
+      <a href="https://github.com/yjd953">GitHub</a>
+    </nav>
+  </header>
+
+  <main class="article-layout">
+    <header class="article-masthead">
+      <a class="back-link" href="../sections/agent.html">← Agent 探索</a>
+      <p class="kicker">01.02 / Agent loop / ZH</p>
+      <h1>一个 Agent 最少需要多少代码？</h1>
+      <p class="article-deck">从几十行循环开始，逐步加入 Memory、Retry、Timeout 与并行工具调用。</p>
+    </header>
+
+    <article class="prose">
+      <p>如果只看核心，Agent 不需要框架，也不需要几千行代码。它需要的只是一个循环：把目标交给模型，识别模型提出的 Tool Call，执行工具，把结果放回消息，再问模型下一步做什么。</p>
+<p>但“能跑”与“能长期运行”之间，正好隔着 Memory、Retry、Timeout、并发、权限和可观测性。下面从一个最小循环开始，逐层把这些能力加回来。</p>
+<h2 id="section-先规定模型与-runtime-的协议">先规定模型与 Runtime 的协议</h2>
+<p>为了不绑定某个模型 SDK，先约定 <code>call_llm</code> 返回两种结果之一：</p>
+<pre><code class="language-python">{&quot;type&quot;: &quot;answer&quot;, &quot;content&quot;: &quot;最终回答&quot;}
+</code></pre>
+<p>或者：</p>
+<pre><code class="language-python">{
+    &quot;type&quot;: &quot;tool_calls&quot;,
+    &quot;calls&quot;: [
+        {
+            &quot;id&quot;: &quot;call_01&quot;,
+            &quot;name&quot;: &quot;get_weather&quot;,
+            &quot;arguments&quot;: {&quot;city&quot;: &quot;Beijing&quot;}
+        }
+    ]
+}
+</code></pre>
+<p>模型厂商的 API 格式可能不同，但 Runtime 最好先适配成自己的内部结构。这样 Agent Loop 不必知道 <code>tool_calls</code> 究竟来自 OpenAI、Claude 还是本地模型。</p>
+<h2 id="section-版本一最小-agent-loop">版本一：最小 Agent Loop</h2>
+<p>下面是核心代码。假设 <code>call_llm(messages, tool_schemas)</code> 已经封装好模型调用：</p>
+<pre><code class="language-python">import json
+
+
+def get_weather(city: str) -&gt; dict:
+    # 示例工具；真实实现可能调用天气 API。
+    return {&quot;city&quot;: city, &quot;temperature&quot;: 18, &quot;condition&quot;: &quot;rain&quot;}
+
+
+TOOLS = {
+    &quot;get_weather&quot;: {
+        &quot;function&quot;: get_weather,
+        &quot;schema&quot;: {
+            &quot;name&quot;: &quot;get_weather&quot;,
+            &quot;description&quot;: &quot;Get current weather for a city.&quot;,
+            &quot;parameters&quot;: {
+                &quot;type&quot;: &quot;object&quot;,
+                &quot;properties&quot;: {
+                    &quot;city&quot;: {&quot;type&quot;: &quot;string&quot;}
+                },
+                &quot;required&quot;: [&quot;city&quot;],
+                &quot;additionalProperties&quot;: False,
+            },
+        },
+    }
+}
+
+
+def run_agent(user_input: str, max_steps: int = 8) -&gt; str:
+    messages = [{&quot;role&quot;: &quot;user&quot;, &quot;content&quot;: user_input}]
+    schemas = [item[&quot;schema&quot;] for item in TOOLS.values()]
+
+    for _ in range(max_steps):
+        response = call_llm(messages, schemas)
+
+        if response[&quot;type&quot;] == &quot;answer&quot;:
+            return response[&quot;content&quot;]
+
+        messages.append({&quot;role&quot;: &quot;assistant&quot;, &quot;tool_calls&quot;: response[&quot;calls&quot;]})
+
+        for call in response[&quot;calls&quot;]:
+            tool = TOOLS.get(call[&quot;name&quot;])
+            if tool is None:
+                result = {&quot;ok&quot;: False, &quot;error&quot;: &quot;unknown_tool&quot;}
+            else:
+                try:
+                    value = tool[&quot;function&quot;](**call[&quot;arguments&quot;])
+                    result = {&quot;ok&quot;: True, &quot;value&quot;: value}
+                except Exception as exc:
+                    result = {&quot;ok&quot;: False, &quot;error&quot;: str(exc)}
+
+            messages.append({
+                &quot;role&quot;: &quot;tool&quot;,
+                &quot;tool_call_id&quot;: call[&quot;id&quot;],
+                &quot;content&quot;: json.dumps(result, ensure_ascii=False),
+            })
+
+    raise RuntimeError(&quot;agent exceeded max_steps&quot;)
+</code></pre>
+<p>去掉工具定义，循环本身只有几十行，却已经具有 Agent 的关键性质：</p>
+<ol>
+<li>模型可以选择回答或行动；</li>
+<li>行动结果会成为下一轮输入；</li>
+<li>模型可以依据结果继续行动；</li>
+<li>Runtime，而不是模型，执行真正的函数；</li>
+<li><code>max_steps</code> 保证循环不会无限进行。</li>
+</ol>
+<p>这就是最小 Agent。Prompt 再复杂、模型再强，也不能替代这段控制流。</p>
+<h2 id="section-先看一次真实执行">先看一次真实执行</h2>
+<p>用户输入：</p>
+<pre><code class="language-text">北京今天适合带伞吗？
+</code></pre>
+<p>消息序列会这样增长：</p>
+<pre><code class="language-text">messages[0] user:
+  北京今天适合带伞吗？
+
+LLM → tool_call:
+  get_weather(city=&quot;Beijing&quot;)
+
+messages[1] assistant:
+  tool_call call_01
+
+messages[2] tool:
+  {&quot;ok&quot;: true, &quot;value&quot;: {&quot;condition&quot;: &quot;rain&quot;, ...}}
+
+LLM → answer:
+  建议带伞，当前天气为雨。
+</code></pre>
+<p>Agent 的“思考过程”不必等同于隐藏的 Chain of Thought。工程上真正可依赖的是可观察事件：模型请求了什么、Runtime 执行了什么、工具返回了什么、下一轮基于哪些输入继续。</p>
+<h2 id="section-版本二加入-memory但不要无限追加">版本二：加入 Memory，但不要无限追加</h2>
+<p>当前 <code>messages</code> 只活在一次函数调用中。下一次用户再问“那上海呢”，系统不知道“那”指天气。</p>
+<p>最简单的 Memory 是按 Session 保存消息：</p>
+<pre><code class="language-python">class InMemorySessionStore:
+    def __init__(self):
+        self.sessions = {}
+
+    def load(self, session_id):
+        return list(self.sessions.get(session_id, []))
+
+    def save(self, session_id, messages):
+        self.sessions[session_id] = list(messages)
+</code></pre>
+<p>然后把入口改为：</p>
+<pre><code class="language-python">def run_agent(session_id, user_input, store, max_steps=8):
+    messages = store.load(session_id)
+    messages.append({&quot;role&quot;: &quot;user&quot;, &quot;content&quot;: user_input})
+    # 原循环……
+    store.save(session_id, messages)
+</code></pre>
+<p>这只是 Conversation History，还不是成熟的长期 Memory。消息会不断增长，最终超过 Context Window。实际系统至少还要做三件事：</p>
+<ul>
+<li>只保留最近若干轮原文；</li>
+<li>把更早内容压缩成可检查的 Summary；</li>
+<li>将用户偏好、任务事实等结构化信息单独存储并按需检索。</li>
+</ul>
+<p>Memory 不是“把所有历史塞回 Prompt”，而是决定哪些过去信息值得进入当前决策。</p>
+<h2 id="section-版本三加入参数校验">版本三：加入参数校验</h2>
+<p>最小代码直接执行：</p>
+<pre><code class="language-python">tool[&quot;function&quot;](**call[&quot;arguments&quot;])
+</code></pre>
+<p>这默认模型一定提供正确参数。现实中它可能漏字段、拼错类型，甚至生成 Schema 外参数。模型输出必须被当作不可信输入。</p>
+<p>使用 JSON Schema 校验后再执行：</p>
+<pre><code class="language-python">from jsonschema import validate
+
+
+def validate_call(tool, arguments):
+    validate(
+        instance=arguments,
+        schema=tool[&quot;schema&quot;][&quot;parameters&quot;],
+    )
+</code></pre>
+<p>校验失败时不要让整个进程崩溃，而应生成结构化 Observation：</p>
+<pre><code class="language-json">{
+  &quot;ok&quot;: false,
+  &quot;error&quot;: {
+    &quot;type&quot;: &quot;invalid_arguments&quot;,
+    &quot;message&quot;: &quot;&#39;city&#39; is required&quot;,
+    &quot;retryable&quot;: true
+  }
+}
+</code></pre>
+<p>模型能根据这个结果修正参数；Runtime 也保留了明确的失败语义。</p>
+<h2 id="section-版本四加入-retry但只重试正确的失败">版本四：加入 Retry，但只重试正确的失败</h2>
+<p>网络抖动可以重试，参数错误不应原样重试；读请求通常可以重试，转账请求则可能造成重复扣款。</p>
+<p>一个克制的重试器需要同时知道错误类型与工具属性：</p>
+<pre><code class="language-python">import random
+import time
+
+
+def execute_with_retry(tool, arguments, attempts=3):
+    last_error = None
+
+    for attempt in range(attempts):
+        try:
+            return {&quot;ok&quot;: True, &quot;value&quot;: tool[&quot;function&quot;](**arguments)}
+        except tool.get(&quot;retryable_errors&quot;, (TimeoutError,)) as exc:
+            last_error = exc
+            if not tool.get(&quot;idempotent&quot;, False):
+                break
+            delay = 0.2 * (2 ** attempt) + random.random() * 0.1
+            time.sleep(delay)
+
+    return {
+        &quot;ok&quot;: False,
+        &quot;error&quot;: {
+            &quot;type&quot;: &quot;tool_execution_failed&quot;,
+            &quot;message&quot;: str(last_error),
+            &quot;retryable&quot;: False,
+        },
+    }
+</code></pre>
+<p>对于有副作用的工具，更可靠的办法是让调用携带 <code>idempotency_key</code>，由服务端保证同一个键只生效一次。不能把“多试几次”当成通用可靠性策略。</p>
+<h2 id="section-版本五加入-timeout-与-cancellation">版本五：加入 Timeout 与 Cancellation</h2>
+<p>没有超时的工具可以让整个 Agent 永久卡住。最外层任务要有总 Deadline，每次工具调用只能使用剩余预算的一部分。</p>
+<pre><code class="language-python">import asyncio
+
+
+async def execute_with_timeout(tool, arguments, timeout_seconds):
+    try:
+        value = await asyncio.wait_for(
+            tool[&quot;async_function&quot;](**arguments),
+            timeout=timeout_seconds,
+        )
+        return {&quot;ok&quot;: True, &quot;value&quot;: value}
+    except asyncio.TimeoutError:
+        return {
+            &quot;ok&quot;: False,
+            &quot;error&quot;: {&quot;type&quot;: &quot;timeout&quot;, &quot;retryable&quot;: True},
+        }
+</code></pre>
+<p><code>wait_for</code> 能取消遵守协作式取消的异步任务，但未必能终止已经发出的远程请求或阻塞线程。严格的 Cancellation 需要工具实现主动接收 Deadline，网络层设置超时，并为不可控代码提供进程或容器隔离。</p>
+<p>超时不是一句 <code>try/except</code>，而是一条从 Session 到 Tool 的预算传播链。</p>
+<h2 id="section-版本六加入-parallel-tool-call">版本六：加入 Parallel Tool Call</h2>
+<p>如果模型同时请求北京和上海天气，两次读操作没有依赖，顺序执行只会增加延迟：</p>
+<pre><code class="language-python">async def execute_one(call):
+    tool = TOOLS[call[&quot;name&quot;]]
+    return call[&quot;id&quot;], await execute_with_timeout(
+        tool,
+        call[&quot;arguments&quot;],
+        timeout_seconds=3,
+    )
+
+
+async def execute_batch(calls):
+    pairs = await asyncio.gather(
+        *(execute_one(call) for call in calls),
+        return_exceptions=True,
+    )
+    return dict(pairs)
+</code></pre>
+<p>并行前要先判断：</p>
+<ul>
+<li>调用之间是否存在数据依赖；</li>
+<li>是否会修改同一资源；</li>
+<li>工具或下游服务是否有限流；</li>
+<li>结果回传时能否用 <code>tool_call_id</code> 正确对应；</li>
+<li>一项失败时，其他调用是保留、取消还是回滚。</li>
+</ul>
+<p>并行不是把所有调用扔进 <code>gather</code>。它要求 Runtime 明确依赖关系和失败策略。</p>
+<h2 id="section-从循环到系统增加的是什么">从循环到系统，增加的是什么</h2>
+<p>将这些版本放在一起，可以看到 Agent 的演化路径：</p>
+<div class="table-scroll"><table>
+<thead>
+<tr>
+<th>阶段</th>
+<th>新增能力</th>
+<th>解决的问题</th>
+<th>新风险</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Loop</td>
+<td>多轮决策</td>
+<td>模型能根据结果继续行动</td>
+<td>无限循环</td>
+</tr>
+<tr>
+<td>Memory</td>
+<td>跨轮信息</td>
+<td>能继续会话与长期任务</td>
+<td>Context 膨胀、错误记忆</td>
+</tr>
+<tr>
+<td>Validation</td>
+<td>输入契约</td>
+<td>拦截错误参数</td>
+<td>Schema 演进</td>
+</tr>
+<tr>
+<td>Retry</td>
+<td>暂时故障恢复</td>
+<td>网络抖动不再直接失败</td>
+<td>重复副作用</td>
+</tr>
+<tr>
+<td>Timeout</td>
+<td>有界等待</td>
+<td>工具不再无限阻塞</td>
+<td>僵尸任务</td>
+</tr>
+<tr>
+<td>Parallel</td>
+<td>独立动作并发</td>
+<td>降低总延迟</td>
+<td>竞态与限流</td>
+</tr>
+</tbody></table></div>
+<p>几十行代码足以证明 Agent Loop 的原理，却不足以承诺生产可靠性。后续增加的大部分代码并不是让模型“更聪明”，而是在回答这些工程问题：</p>
+<ul>
+<li>这一步允许执行吗？</li>
+<li>最多执行多久、多少次、花多少钱？</li>
+<li>失败以后能不能重试？</li>
+<li>结果是否真的生效？</li>
+<li>任务能不能暂停、恢复和取消？</li>
+<li>出问题时能不能完整回放？</li>
+</ul>
+<h2 id="section-最小实现的真正价值">最小实现的真正价值</h2>
+<p>自己写一次最小 Agent，不是为了拒绝框架，而是为了识别框架替你做了什么。一个成熟框架可能隐藏消息适配、工具注册、并发调度和持久化；如果不了解最小循环，遇到重复调用、Context 污染或超时失效时，只能在抽象层外猜测。</p>
+<p>Agent 的最小核心可以很短：</p>
+<pre><code class="language-text">LLM → Tool Call → Execute → Result → LLM
+</code></pre>
+<p>Agent 系统之所以变大，是因为现实世界要求它在错误、延迟、权限和副作用面前仍然可控。代码量增长的不是“智能”，而是系统对不确定性的管理能力。</p>
+
+    </article>
+  </main>
+
+  <footer class="site-footer article-footer">
+    <a href="../sections/agent.html">Agent 探索 / 核心机制</a>
+    <a href="https://github.com/yjd953/yjd953/blob/main/posts/minimal-agent-code.md">View source ↗</a>
+  </footer>
+  <script src="../assets/site.js" defer></script>
+</body>
+</html>

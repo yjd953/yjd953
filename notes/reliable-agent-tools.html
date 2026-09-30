@@ -1,0 +1,336 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="围绕校验、权限、超时、重试、幂等、追踪和版本控制构建 Runtime 防线。">
+  <meta name="theme-color" content="#f1f1ee">
+  <title>如何设计一个可靠的 Agent Tool 系统？ — Dale Yang</title>
+  <link rel="stylesheet" href="../assets/site.css">
+</head>
+<body class="article-page">
+  <div class="reading-progress" id="readingProgress" aria-hidden="true"></div>
+
+  <header class="site-header">
+    <a class="wordmark" href="../" aria-label="Dale Yang home">DY<span>.</span></a>
+    <nav aria-label="Primary">
+      <a href="../sections/agent.html">Agent 探索</a>
+      <a href="https://github.com/yjd953">GitHub</a>
+    </nav>
+  </header>
+
+  <main class="article-layout">
+    <header class="article-masthead">
+      <a class="back-link" href="../sections/agent.html">← Agent 探索</a>
+      <p class="kicker">01.12 / Tool systems / ZH</p>
+      <h1>如何设计一个可靠的 Agent Tool 系统？</h1>
+      <p class="article-deck">围绕校验、权限、超时、重试、幂等、追踪和版本控制构建 Runtime 防线。</p>
+    </header>
+
+    <article class="prose">
+      <p>模型可以生成错误参数、选错工具、重复请求，也可能在执行一半时改变主意。可靠 Tool 系统不能假设模型永远正确，它必须把 Tool Call 当作来自不可信决策器的执行提案。</p>
+<p>核心原则是：</p>
+<blockquote>
+<p>模型负责提出“想做什么”，Runtime 负责决定“能不能做、怎样做、做完如何证明”。</p>
+</blockquote>
+<h2 id="section-从-tool-contract-开始">从 Tool Contract 开始</h2>
+<p>一个工具不能只有函数名。完整契约至少包含：</p>
+<pre><code class="language-yaml">name: create_refund
+version: 3.2.0
+description: Create a refund for one paid order.
+input_schema: ...
+output_schema: ...
+permissions:
+  - order:read
+  - refund:write
+side_effect: irreversible
+idempotent: true
+timeout_ms: 5000
+retry_policy: transient_only
+confirmation: required_above_100
+</code></pre>
+<p>这些字段分别服务于模型、Runtime 和审计系统。Description 帮助模型选择；Schema 用于校验；权限、超时和重试策略必须由 Runtime 强制执行。</p>
+<h2 id="section-schema-validation模型输出永远不是可信参数">Schema Validation：模型输出永远不是可信参数</h2>
+<p>假设模型生成：</p>
+<pre><code class="language-json">{
+  &quot;name&quot;: &quot;create_refund&quot;,
+  &quot;arguments&quot;: {
+    &quot;order_id&quot;: &quot;o_123&quot;,
+    &quot;amount&quot;: &quot;all&quot;,
+    &quot;reason&quot;: &quot;user request&quot;,
+    &quot;notify&quot;: true
+  }
+}
+</code></pre>
+<p>如果 <code>amount</code> 应是整数分，Runtime 必须拒绝，而不是猜 <code>&quot;all&quot;</code> 表示全额。</p>
+<p>一个更严格的 Schema：</p>
+<pre><code class="language-json">{
+  &quot;type&quot;: &quot;object&quot;,
+  &quot;properties&quot;: {
+    &quot;order_id&quot;: {
+      &quot;type&quot;: &quot;string&quot;,
+      &quot;pattern&quot;: &quot;^o_[a-zA-Z0-9]+$&quot;
+    },
+    &quot;amount_cents&quot;: {
+      &quot;type&quot;: &quot;integer&quot;,
+      &quot;minimum&quot;: 1
+    },
+    &quot;reason_code&quot;: {
+      &quot;type&quot;: &quot;string&quot;,
+      &quot;enum&quot;: [&quot;duplicate&quot;, &quot;service_failure&quot;, &quot;customer_request&quot;]
+    }
+  },
+  &quot;required&quot;: [&quot;order_id&quot;, &quot;amount_cents&quot;, &quot;reason_code&quot;],
+  &quot;additionalProperties&quot;: false
+}
+</code></pre>
+<p>Schema 之后仍要做业务校验：</p>
+<ul>
+<li>订单是否属于当前用户；</li>
+<li>是否已经退款；</li>
+<li>金额是否超过可退余额；</li>
+<li>订单所在地区是否允许该原因；</li>
+<li>当前时间是否超过退款窗口。</li>
+</ul>
+<p>类型正确不等于业务合法。</p>
+<h2 id="section-permission授权必须绑定真实身份">Permission：授权必须绑定真实身份</h2>
+<p>模型可能在 Prompt Injection 影响下请求高风险工具。System Prompt 中写“不要越权”不是访问控制。</p>
+<p>Runtime 应基于可信上下文判断：</p>
+<pre><code class="language-text">Principal：谁发起任务
+Resource：要操作哪个对象
+Action：read / write / delete / execute
+Environment：租户、区域、设备、时间
+Policy：是否允许，是否需要审批
+</code></pre>
+<p>授权结果不应来自模型参数中的 <code>user_id</code>。用户身份必须由会话或服务令牌注入：</p>
+<pre><code class="language-python">handler(
+    arguments=validated_arguments,
+    principal=runtime_context.principal,
+)
+</code></pre>
+<p>对于写操作，可以引入风险分级：</p>
+<div class="table-scroll"><table>
+<thead>
+<tr>
+<th>风险</th>
+<th>示例</th>
+<th>处理</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>低</td>
+<td>读取公开文档</td>
+<td>自动执行</td>
+</tr>
+<tr>
+<td>中</td>
+<td>修改草稿、创建临时资源</td>
+<td>明确展示后执行</td>
+</tr>
+<tr>
+<td>高</td>
+<td>转账、删除、外发消息</td>
+<td>人工确认或双重授权</td>
+</tr>
+</tbody></table></div>
+<p>确认信息要展示实际参数和影响，不能只问“是否继续”。</p>
+<h2 id="section-timeout每个动作必须有上界">Timeout：每个动作必须有上界</h2>
+<p>工具超时至少有三层：</p>
+<pre><code class="language-text">Agent Run Deadline
+  └─ Tool Call Timeout
+       └─ 下游连接 / 读取 Timeout
+</code></pre>
+<p>如果 Run 只剩 4 秒，Runtime 不应再发起默认超时 30 秒的调用。Deadline 要向下传播。</p>
+<p>超时结果还需区分：</p>
+<pre><code class="language-text">not_started      请求未发送，可安全重试
+in_flight        是否生效未知，先查询状态
+server_cancelled 服务确认取消
+completed_late   已生效但结果迟到
+</code></pre>
+<p>仅返回 <code>timeout</code> 会让模型无法判断下一步，也可能导致重复副作用。</p>
+<h2 id="section-retry只恢复暂时故障">Retry：只恢复暂时故障</h2>
+<p>可以重试的常见错误：</p>
+<ul>
+<li>连接建立失败；</li>
+<li>读操作超时；</li>
+<li>服务端明确返回可重试状态；</li>
+<li>限流并提供 <code>retry_after</code>。</li>
+</ul>
+<p>不应原样重试：</p>
+<ul>
+<li>参数校验失败；</li>
+<li>权限拒绝；</li>
+<li>业务规则冲突；</li>
+<li>非幂等写操作结果未知；</li>
+<li>工具版本不兼容。</li>
+</ul>
+<p>重试需要指数退避、随机抖动和总预算：</p>
+<pre><code class="language-text">attempt 1 → 200ms
+attempt 2 → 400ms + jitter
+attempt 3 → 800ms + jitter
+stop when deadline is exhausted
+</code></pre>
+<p>模型不必看见每一次网络抖动，但 Trace 必须记录。最终 Observation 应说明执行了几次以及最终状态。</p>
+<h2 id="section-idempotency防止同一意图生效两次">Idempotency：防止同一意图生效两次</h2>
+<p>创建订单、发消息、退款等动作可能在服务端成功后丢失响应。Runtime 重试时，工具必须识别这是同一项业务意图。</p>
+<pre><code class="language-http">POST /refunds
+Idempotency-Key: run_42:call_07
+</code></pre>
+<p>服务端保存键与结果：</p>
+<pre><code class="language-text">首次请求 → 创建 refund_99，保存映射
+重复请求 → 直接返回 refund_99，不再次退款
+</code></pre>
+<p>幂等键应稳定绑定逻辑调用，不能每次 Retry 重新生成。模型也不应负责生成这个键，否则它可能改变或复用错误值。</p>
+<p>对于天然不幂等的系统，需要执行前查询、事务 Outbox、去重表或补偿操作。</p>
+<h2 id="section-result-verification成功响应不等于目标完成">Result Verification：成功响应不等于目标完成</h2>
+<p>工具返回：</p>
+<pre><code class="language-json">{&quot;ok&quot;: true, &quot;refund_id&quot;: &quot;r_99&quot;}
+</code></pre>
+<p>这证明调用被接受，不一定证明退款到账。可靠系统要定义完成语义：</p>
+<pre><code class="language-text">accepted  已受理
+processing 执行中
+succeeded 已完成并可查询
+failed    明确失败
+unknown   结果未知
+</code></pre>
+<p>高风险动作可以使用独立读工具核验：</p>
+<pre><code class="language-text">create_refund → refund_id
+get_refund(refund_id) → status=succeeded
+</code></pre>
+<p>验证最好来自权威外部状态，而不是让模型阅读“success”字符串后自行宣布完成。</p>
+<h2 id="section-error-model让失败可被程序理解">Error Model：让失败可被程序理解</h2>
+<p>避免只返回：</p>
+<pre><code class="language-json">{&quot;error&quot;: &quot;something went wrong&quot;}
+</code></pre>
+<p>更好的错误：</p>
+<pre><code class="language-json">{
+  &quot;ok&quot;: false,
+  &quot;error&quot;: {
+    &quot;code&quot;: &quot;REFUND_ALREADY_EXISTS&quot;,
+    &quot;category&quot;: &quot;business_conflict&quot;,
+    &quot;message&quot;: &quot;A refund already exists for this order.&quot;,
+    &quot;retryable&quot;: false,
+    &quot;existing_resource_id&quot;: &quot;r_99&quot;
+  }
+}
+</code></pre>
+<p>稳定的错误类型让 Runtime 可以执行确定策略，也让模型知道应查询已有资源，而不是换个措辞重复创建。</p>
+<p>不要把内部堆栈、凭证或数据库细节直接送入模型。详细异常进入受控日志，Observation 只保留决策所需信息。</p>
+<h2 id="section-logging-与-trace记录意图执行和结果">Logging 与 Trace：记录意图、执行和结果</h2>
+<p>每次 Tool Call 至少记录：</p>
+<pre><code class="language-json">{
+  &quot;trace_id&quot;: &quot;tr_1&quot;,
+  &quot;tool_call_id&quot;: &quot;call_7&quot;,
+  &quot;tool&quot;: &quot;create_refund&quot;,
+  &quot;version&quot;: &quot;3.2.0&quot;,
+  &quot;argument_hash&quot;: &quot;sha256:...&quot;,
+  &quot;principal&quot;: &quot;user_hash&quot;,
+  &quot;policy&quot;: &quot;allow_after_confirmation&quot;,
+  &quot;attempt&quot;: 1,
+  &quot;started_at&quot;: &quot;...&quot;,
+  &quot;duration_ms&quot;: 482,
+  &quot;status&quot;: &quot;accepted&quot;,
+  &quot;external_request_id&quot;: &quot;req_88&quot;,
+  &quot;result_ref&quot;: &quot;secure://...&quot;
+}
+</code></pre>
+<p>三个值要分开：</p>
+<ul>
+<li>模型请求了什么；</li>
+<li>Runtime 实际执行了什么；</li>
+<li>外部系统最终发生了什么。</li>
+</ul>
+<p>它们不总是一致。例如 Runtime 可能规范化参数、拒绝动作，或执行成功但后续核验失败。</p>
+<h2 id="section-versioningschema-与实现必须一起演进">Versioning：Schema 与实现必须一起演进</h2>
+<p>假设 v1 使用：</p>
+<pre><code class="language-json">{&quot;amount&quot;: 100}
+</code></pre>
+<p>v2 改为：</p>
+<pre><code class="language-json">{&quot;amount_cents&quot;: 10000, &quot;currency&quot;: &quot;CNY&quot;}
+</code></pre>
+<p>如果模型看到 v2 Schema，Worker 却执行 v1 Handler，就可能造成金额错误。</p>
+<p>发布时应绑定：</p>
+<pre><code class="language-text">tool_name + schema_version + handler_version + policy_version
+</code></pre>
+<p>破坏性修改优先发布新工具版本或新名称，在旧 Session 清空前保持兼容。Trace 中记录版本，离线评测也要按版本分组。</p>
+<h2 id="section-parallel-execution并发前先声明依赖">Parallel Execution：并发前先声明依赖</h2>
+<p>模型一次返回多个 Tool Call，不代表它们可以安全并行。</p>
+<p>可以并行：</p>
+<pre><code class="language-text">get_weather(Beijing)
+get_weather(Shanghai)
+</code></pre>
+<p>不能直接并行：</p>
+<pre><code class="language-text">create_order()
+pay_order(order_id)
+</code></pre>
+<p>两个写操作即使参数独立，也可能竞争同一资源。Runtime 应根据 Tool 元数据和计划依赖建立执行图，并设置：</p>
+<ul>
+<li>每工具并发上限；</li>
+<li>每租户速率限制；</li>
+<li>Fail-fast 或部分成功策略；</li>
+<li>结果按 <code>tool_call_id</code> 关联；</li>
+<li>取消时如何处理已开始动作。</li>
+</ul>
+<p>并发是调度能力，不应完全由模型输出顺序隐式决定。</p>
+<h2 id="section-一个可靠执行管线">一个可靠执行管线</h2>
+<p>把这些要求合在一起：</p>
+<pre><code class="language-text">1. Receive proposal
+   接收模型 Tool Call
+
+2. Resolve exact version
+   在 Registry 中解析确定版本
+
+3. Parse and validate
+   JSON、Schema、业务规则
+
+4. Authorize
+   身份、资源、动作、风险与确认
+
+5. Schedule
+   Deadline、并发、限流、依赖
+
+6. Execute
+   隔离运行，传递幂等键与取消信号
+
+7. Normalize
+   统一成功、失败与结果未知
+
+8. Verify
+   对关键副作用读取权威状态
+
+9. Record
+   日志、Trace、版本与审计
+
+10. Observe
+    只把必要、脱敏、可理解的结果交给模型
+</code></pre>
+<p>这条管线应位于模型与现实能力之间，不能依赖模型自觉遵守。</p>
+<h2 id="section-最重要的责任边界">最重要的责任边界</h2>
+<p>模型可以：</p>
+<ul>
+<li>误解用户；</li>
+<li>选错工具；</li>
+<li>漏掉参数；</li>
+<li>重复提出同一动作；</li>
+<li>过早宣布完成。</li>
+</ul>
+<p>Runtime 不应该因此：</p>
+<ul>
+<li>执行越权操作；</li>
+<li>无限等待或无限重试；</li>
+<li>重复产生副作用；</li>
+<li>把失败包装成成功；</li>
+<li>丢失审计证据。</li>
+</ul>
+<p>可靠 Tool 系统不是让错误永不发生，而是让错误在明确边界内发生：尽早校验、限制影响、保留证据、允许恢复。模型的概率性是 Agent 获得开放决策能力的来源，Runtime 的确定性则是这份能力能够进入生产环境的前提。</p>
+
+    </article>
+  </main>
+
+  <footer class="site-footer article-footer">
+    <a href="../sections/agent.html">Agent 探索 / 核心机制</a>
+    <a href="https://github.com/yjd953/yjd953/blob/main/posts/reliable-agent-tools.md">View source ↗</a>
+  </footer>
+  <script src="../assets/site.js" defer></script>
+</body>
+</html>

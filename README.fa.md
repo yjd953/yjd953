@@ -18,27 +18,16 @@
 [مخزن‌ها](https://github.com/yjd953?tab=repositories) ·
 [تماس](https://github.com/yjd953/yjd953/issues/new?title=Hello%20Dale)
 
-## نوشته‌ها
+## مسیرها
 
-**01 / سیستم‌های Agent**<br>
-[From Demo to Production: Four Reliability Pillars for Agents](https://yjd953.github.io/yjd953/notes/agent-reliability.html)<br>
-وضعیت صریح، اجرای محدود، راستی‌آزمایی اثرات، بازیابی و کنترل انتشار.
+**01 / [کاوش Agent](https://yjd953.github.io/yjd953/sections/agent.html)**<br>
+حلقه‌های Agent، ابزارها، حافظه، Runtime، MCP، Trace، اشکال‌زدایی و قابلیت اطمینان.
 
-**02 / ابزارها**<br>
-[A Practical Tool-Use Checklist](https://yjd953.github.io/yjd953/notes/tool-use-checklist.html)<br>
-قرارداد ابزار، مجوزدهی، ایدمپوتنسی، خطاها، راستی‌آزمایی و حریم خصوصی.
+**02 / [مبانی سیستم‌های کامپیوتری](https://yjd953.github.io/yjd953/sections/computer-systems.html)**<br>
+اجرای برنامه، CPU و حافظه، فرایندها، شبکه، کامپایلر، سیستم فایل، SSD و سازوکارهای داخلی پایگاه داده.
 
-**03 / ارزیابی**<br>
-[Trace-Native Evaluation: From a Score to a Release Gate](https://yjd953.github.io/yjd953/notes/trace-native-evaluation.html)<br>
-اتصال بازپخش آفلاین، تحلیل ردپا، بازخورد تولید و دروازه‌های انتشار مبتنی بر ریسک.
-
-**04 / مشاهده‌پذیری**<br>
-[Agent Observability: Metrics That Expose Failure](https://yjd953.github.io/yjd953/notes/agent-observability.html)<br>
-نتیجه تأییدشده، عمق اجرا، هزینه توکن، تأخیر، سلامت ابزار و کنترل انسانی.
-
-**05 / بک‌اند**<br>
-[后端开发八股文指南](https://yjd953.github.io/yjd953/notes/backend-interview-guide.html)<br>
-۹۰ موضوع پرتکرار درباره Java، Go، JVM، Redis، MySQL، MQ، شبکه و سیستم‌های توزیع‌شده.
+**03 / [مبانی بک‌اند](https://yjd953.github.io/yjd953/sections/backend.html)**<br>
+Java، Go، JVM، Redis، MySQL، MQ، شبکه و سیستم‌های توزیع‌شده.
 
 ## فعالیت
 

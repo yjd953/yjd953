@@ -1,0 +1,271 @@
+# MCP 到底解决了什么问题？
+
+假设一个 Agent 要接入 GitHub、文件系统、数据库、浏览器、日志平台和企业文档。没有统一协议时，每接一个系统都要重复回答：
+
+- 有哪些能力可用？
+- 参数和返回值是什么？
+- 如何建立连接？
+- 如何把请求和响应关联起来？
+- 能读取哪些上下文资源？
+- 权限与生命周期由谁管理？
+
+MCP，Model Context Protocol，首先解决的不是“让模型更聪明”，而是**让提供上下文能力的一方与使用能力的 Agent Runtime 之间形成通用协议**。
+
+## 没有 MCP 时，集成成本在哪里
+
+最直接的接法是为每个服务写 Adapter：
+
+```text
+Agent Runtime
+  ├─ GitHubAdapter
+  ├─ DatabaseAdapter
+  ├─ BrowserAdapter
+  ├─ LogPlatformAdapter
+  └─ DocsAdapter
+```
+
+每个 Adapter 都可能有自己的：
+
+- 工具定义格式；
+- 鉴权配置；
+- 请求封装；
+- 错误模型；
+- 长连接机制；
+- 资源读取方式；
+- 版本兼容逻辑。
+
+如果三个 Agent 产品都要接这五个服务，可能出现十五套集成。更麻烦的是，服务能力一变，所有调用方都要更新。
+
+MCP 把关系改为：
+
+```text
+多个 Agent / IDE / Runtime
+        ↓ MCP Client
+       统一协议
+        ↑ MCP Server
+GitHub / Database / Browser / Logs / Docs
+```
+
+能力提供方实现一次 MCP Server，多个支持 MCP 的 Host 就可以用相同方式发现和调用。
+
+## Host、Client、Server 分别是谁
+
+这三个角色经常被混用。
+
+### Host：承载用户体验与决策循环
+
+Host 可能是 IDE、桌面应用、代码 Agent 或企业机器人。它负责：
+
+- 与用户交互；
+- 调用 LLM；
+- 选择哪些 Server 可以连接；
+- 组合 Context；
+- 实施用户授权与安全策略。
+
+### Client：Host 内的一条协议连接
+
+MCP Client 负责与一个 Server 通信，进行初始化、能力协商、发送请求和接收通知。
+
+一个 Host 可以同时创建多个 Client：
+
+```text
+Host
+  ├─ MCP Client A ↔ Filesystem Server
+  ├─ MCP Client B ↔ Database Server
+  └─ MCP Client C ↔ GitHub Server
+```
+
+Client 不是模型。它是 Runtime 中的协议组件。
+
+### Server：暴露上下文与动作
+
+Server 把某个系统的能力包装成 MCP 原语。它可能运行在本地子进程，也可能是远程服务。
+
+Server 内部仍可以调用现有 SDK、CLI 或 HTTP API。MCP 不要求重写业务后端，只要求在边界上以统一方式声明和处理能力。
+
+## Tool Discovery：不再把工具写死在 Host
+
+连接建立后，Client 可以请求 Server 列出工具。返回内容大致包括名称、描述与输入 Schema：
+
+```json
+{
+  "tools": [
+    {
+      "name": "search_logs",
+      "description": "Search service logs in a bounded time range.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "service": {"type": "string"},
+          "minutes": {"type": "integer", "maximum": 120}
+        },
+        "required": ["service", "minutes"]
+      }
+    }
+  ]
+}
+```
+
+Host 不必在代码中预先知道 `search_logs`。它可以在运行时发现工具，再根据策略挑选一部分交给模型。
+
+Discovery 的价值不是让模型同时看到几千个工具。恰恰相反，Host 应基于用户、任务和权限做筛选。把所有发现结果直接塞进 Context，会增加 Token、工具混淆和攻击面。
+
+## Schema：统一描述，不等于自动安全
+
+MCP 为工具提供结构化 Schema，解决不同 Server 如何描述参数的问题。它支持 Runtime 做基础校验，也帮助模型生成正确参数。
+
+但 Schema 只能表达一部分约束：
+
+```json
+{"path": "src/app.py"}
+```
+
+`path` 是字符串并不代表允许读取。它是否越过工作区、是否包含密钥、当前用户是否有权访问，都需要 Host 或 Server 的策略层判断。
+
+因此安全链应是：
+
+```text
+Schema validation
+→ Host policy
+→ Server authorization
+→ Backend permission
+```
+
+不能因为调用来自 MCP，就默认可信。
+
+## Tool：模型可以请求的动作
+
+Tool 表示可能产生计算或副作用的操作，例如：
+
+- 搜索日志；
+- 执行 SQL；
+- 创建 Issue；
+- 修改文件；
+- 启动浏览器。
+
+模型生成 Tool Call 后，Host 决定是否允许，通过 Client 发给 Server。Server 执行并返回结构化内容。
+
+```text
+LLM 提议 call_tool
+→ Host 校验和授权
+→ MCP Client 发送请求
+→ MCP Server 执行
+→ Tool Result 返回
+→ Host 构造 Observation
+```
+
+MCP 规范化了请求和响应，但是否重试、是否需要人工确认、结果是否足够证明成功，仍是 Runtime 的责任。
+
+## Resource：可被读取的上下文对象
+
+Resource 更像可寻址内容，而不是动作。它可以表示文件、Schema、文档或运行状态，并通过 URI 标识：
+
+```text
+file:///workspace/README.md
+db-schema://orders/public
+logs://payment-api/error-catalog
+```
+
+Tool 与 Resource 的区别可以这样理解：
+
+```text
+Resource：给我这个对象的内容
+Tool：替我执行这个操作
+```
+
+读取静态配置适合 Resource；带查询条件搜索海量日志通常更适合 Tool。两者边界会因 Server 设计而变化，但区分“上下文对象”和“动作”有助于 Host 做权限与缓存。
+
+Resource 也不应全部自动进入 Prompt。Host 可以先列出元数据，在模型或用户需要时再读取，避免 Context 被无关内容占满。
+
+## Transport：协议消息如何移动
+
+MCP 定义交互语义，Transport 决定消息如何传输。常见方式包括：
+
+- 本地 `stdio`：Host 启动子进程，通过标准输入输出交换消息；
+- 基于 HTTP 的远程传输：Client 与远程 Server 通信，并支持流式或会话能力。
+
+本地 `stdio` 的优势是部署简单，适合 IDE 工具；风险是子进程继承的文件和环境权限可能过大。远程传输便于集中部署，却必须处理认证、租户隔离、网络超时和服务端限流。
+
+Transport 只负责把协议消息送达，不决定模型是否应该调用工具。
+
+## 一次 MCP Tool Call 的真实路径
+
+以查询日志为例：
+
+```text
+1. Host 启动，与 Logs MCP Server 初始化连接
+2. Client 请求 tools/list
+3. Server 返回 search_logs Schema
+4. Host 根据任务和权限把该 Tool 提供给 LLM
+5. LLM 生成 search_logs 参数
+6. Host 校验参数并确认用户有日志权限
+7. Client 发送 tools/call 请求
+8. Server 调用内部日志 API
+9. Server 对结果截断、脱敏并返回
+10. Host 记录 Trace，将结果放入模型 Context
+11. LLM 基于结果继续分析
+```
+
+其中只有第 5 和第 11 步由模型完成。MCP 覆盖的是能力发现与调用通道，不是完整 Agent Loop。
+
+## MCP 与普通 HTTP API 的区别
+
+HTTP API 回答“某个服务如何通过 HTTP 被调用”。MCP 回答“一个 Agent Host 如何用统一语义发现并使用上下文能力”。
+
+| 维度 | HTTP API | MCP |
+| --- | --- | --- |
+| 面向对象 | 任意程序与服务 | AI Host / Client 与 Context Server |
+| 能力发现 | 常依赖文档或 OpenAPI | 协议内列出 Tools、Resources 等 |
+| 交互模型 | 由每个 API 自定义 | 使用统一协议原语 |
+| 传输 | HTTP | 可有本地或远程传输 |
+| 后端实现 | 直接业务服务 | 常包装已有 API、SDK 或 CLI |
+| 模型集成 | 需自行适配 | 更贴近 Runtime 的上下文与工具层 |
+
+MCP Server 完全可能在内部调用 HTTP API。两者不是竞争关系。
+
+## MCP 与 RPC 的区别
+
+从技术形态看，MCP 确实具有 RPC 特征：Client 发送带 ID 的请求，Server 返回结果，也可以发送通知。
+
+差别主要在语义层：
+
+- 普通 RPC 框架关注跨进程调用任意服务方法；
+- MCP 预定义了面向模型上下文的角色、生命周期和能力类型；
+- MCP Tool 使用模型可读描述和 JSON Schema；
+- Resources 等原语直接服务于上下文发现与读取。
+
+可以说 MCP 使用了 RPC 思想，但在上面规定了 Agent 生态共享的能力模型。
+
+## MCP 没有解决什么
+
+理解边界比理解功能更重要。MCP 不自动解决：
+
+- 模型是否选对工具；
+- Tool Description 是否清晰；
+- 用户是否应该授权高风险动作；
+- Server 返回内容是否可信；
+- Prompt Injection；
+- 重试是否会产生重复副作用；
+- 工具结果是否证明任务完成；
+- 长任务如何保存 State；
+- 多个工具之间如何规划。
+
+这些仍属于 Host、Runtime、Server 实现和产品安全策略。
+
+尤其不能把“支持 MCP”理解成“可以安全连接任意 Server”。Server 是代码与数据边界，可能读取本地文件、访问网络或返回恶意内容。Host 必须明确来源、权限和可见范围。
+
+## 真正被标准化的是接入边界
+
+在 MCP 之前，Agent 接入工具往往是一对一工程：每个 Host 理解每个服务的特殊格式。在 MCP 之后，双方可以围绕共同协议演进：
+
+```text
+能力提供方负责：
+  把服务包装成规范的 Tool / Resource
+
+Agent Host 负责：
+  连接、发现、筛选、授权、调用和上下文编排
+```
+
+这降低了集成重复劳动，也让工具生态可以被不同 Agent 复用。
+
+因此，MCP 解决的核心问题不是“如何发一个 HTTP 请求”，也不是“如何让模型自动工作”。它解决的是：当 Agent 需要接入越来越多外部能力时，如何让能力的发现、描述、调用和结果交换拥有一个共同边界。

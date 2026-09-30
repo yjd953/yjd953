@@ -1,0 +1,279 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="从 ./app 追踪 fork、exec、ELF、Loader、虚拟内存、动态链接，直到 main 真正执行。">
+  <meta name="theme-color" content="#f1f1ee">
+  <title>一个程序启动的时候，操作系统到底做了什么？ — Dale Yang</title>
+  <link rel="stylesheet" href="../assets/site.css">
+</head>
+<body class="article-page">
+  <div class="reading-progress" id="readingProgress" aria-hidden="true"></div>
+
+  <header class="site-header">
+    <a class="wordmark" href="../" aria-label="Dale Yang home">DY<span>.</span></a>
+    <nav aria-label="Primary">
+      <a href="../sections/computer-systems.html">计算机底层</a>
+      <a href="https://github.com/yjd953">GitHub</a>
+    </nav>
+  </header>
+
+  <main class="article-layout">
+    <header class="article-masthead">
+      <a class="back-link" href="../sections/computer-systems.html">← 计算机底层</a>
+      <p class="kicker">02.01 / Program loading / ZH</p>
+      <h1>一个程序启动的时候，操作系统到底做了什么？</h1>
+      <p class="article-deck">从 ./app 追踪 fork、exec、ELF、Loader、虚拟内存、动态链接，直到 main 真正执行。</p>
+    </header>
+
+    <article class="prose">
+      <p>在 Linux 终端输入：</p>
+<pre><code class="language-bash">./app
+</code></pre>
+<p>看起来只是“运行一个文件”。实际上，从按下回车到 <code>main()</code> 第一条语句之间，Shell、内核、ELF Loader、虚拟内存系统、动态链接器和 C Runtime 已经完成了一串精密交接。</p>
+<p>下面以 Linux x86-64 上的动态链接 ELF 程序为主线。不同操作系统和静态链接程序细节不同，但职责分层相近。</p>
+<h2 id="section-第-0-步shell-先把命令变成一次执行请求">第 0 步：Shell 先把命令变成一次执行请求</h2>
+<p>终端程序只负责收发字符。真正解析 <code>./app</code> 的通常是 Bash、Zsh 等 Shell。</p>
+<p>Shell 先完成：</p>
+<ol>
+<li>词法解析，识别命令名和参数；</li>
+<li>展开变量、通配符、重定向与管道；</li>
+<li>判断它是内建命令、函数还是外部程序；</li>
+<li>为前台或后台任务设置进程组；</li>
+<li>准备标准输入、输出和错误。</li>
+</ol>
+<p><code>./app</code> 带有斜杠，因此 Shell 不搜索 <code>PATH</code>，直接使用当前目录下的 <code>app</code>。内核随后检查路径是否存在、是否为普通文件、当前用户是否具有执行权限，以及挂载点是否带有 <code>noexec</code>。</p>
+<p>传统 Unix 心智模型是：</p>
+<pre><code class="language-text">Shell
+  ├─ fork() 复制出子进程
+  └─ 子进程 execve(&quot;./app&quot;, argv, envp)
+</code></pre>
+<p><code>fork()</code> 后父子进程看似拥有同一份内存，内核通常通过 Copy-on-Write 共享物理页；只有一方写入时才复制。父 Shell 留在原程序中等待，子进程准备变成 <code>app</code>。</p>
+<p>现代 Shell 也可能使用 <code>vfork()</code>、<code>posix_spawn()</code> 或内部优化，但最终都要触发类似 <code>execve</code> 的内核装载路径。</p>
+<h2 id="section-第-1-步execve-不是创建新进程">第 1 步：<code>execve</code> 不是创建新进程</h2>
+<p>一个常见误解是 <code>execve()</code> “启动了新进程”。更准确地说：</p>
+<blockquote>
+<p><code>fork</code> 创建新的进程身份，<code>execve</code> 用新程序替换当前进程的用户态映像。</p>
+</blockquote>
+<p>调用：</p>
+<pre><code class="language-c">execve(&quot;./app&quot;, argv, envp);
+</code></pre>
+<p>成功后不会返回。子进程的 PID 通常不变，但原来的：</p>
+<ul>
+<li>代码段；</li>
+<li>数据段；</li>
+<li>用户栈；</li>
+<li>大部分内存映射；</li>
+<li>线程；</li>
+<li>信号处理函数；</li>
+</ul>
+<p>会被新程序替换或重置。</p>
+<p>并非所有资源都消失。没有设置 <code>FD_CLOEXEC</code> 的文件描述符会跨 <code>exec</code> 保留，这正是 Shell 实现重定向和管道的基础：</p>
+<pre><code class="language-bash">./app &gt; output.txt
+</code></pre>
+<p>Shell 可以先让子进程把文件绑定到描述符 1，再执行 <code>app</code>。新程序一启动，自己的标准输出已经指向该文件。</p>
+<h2 id="section-第-2-步内核识别-elf">第 2 步：内核识别 ELF</h2>
+<p>内核读取文件开头。Linux 可执行文件通常是 ELF，前四字节为：</p>
+<pre><code class="language-text">7f 45 4c 46
+ .  E  L  F
+</code></pre>
+<p>ELF Header 告诉内核：</p>
+<ul>
+<li>32 位还是 64 位；</li>
+<li>大端还是小端；</li>
+<li>目标指令集；</li>
+<li>文件类型是可执行文件还是位置无关可执行文件；</li>
+<li>程序入口地址；</li>
+<li>Program Header Table 在哪里。</li>
+</ul>
+<p>真正指导装载的是 <strong>Program Header</strong>，而不是链接器和调试器常看的 Section Header。Program Header 中的 <code>PT_LOAD</code> 描述哪些文件区间要映射到进程地址空间，以及它们需要读、写还是执行权限。</p>
+<p>可以观察：</p>
+<pre><code class="language-bash">readelf -h ./app
+readelf -l ./app
+</code></pre>
+<p>典型映射大致是：</p>
+<pre><code class="language-text">文件中的代码和只读数据 → r-x / r-- 映射
+已初始化全局变量       → rw- 映射
+BSS                     → 匿名零页
+</code></pre>
+<p>权限分离很重要。采用 W^X 原则时，同一页不应同时可写和可执行，降低代码注入风险。</p>
+<h2 id="section-第-3-步建立新的虚拟地址空间">第 3 步：建立新的虚拟地址空间</h2>
+<p>进程看到的是虚拟地址，不是直接拿到一段连续物理内存。内核为新进程准备页表和内存区域描述：</p>
+<pre><code class="language-text">高地址
+┌──────────────────────┐
+│ Kernel space         │  用户态不可直接访问
+├──────────────────────┤
+│ Stack                │  通常向低地址增长
+├──────────────────────┤
+│ mmap area            │  共享库、匿名映射、文件映射
+├──────────────────────┤
+│ Heap                 │  传统上向高地址增长
+├──────────────────────┤
+│ BSS / Data           │
+├──────────────────────┤
+│ Read-only / Text     │
+└──────────────────────┘
+低地址
+</code></pre>
+<p>这只是典型布局，具体地址受架构、PIE、ASLR 和内核策略影响。</p>
+<p>此时“映射 2MB 代码”不等于立即从磁盘读入 2MB，也不等于立即分配 2MB 物理页。内核主要建立虚拟内存区域。真正访问某页时，CPU 发现页表项不存在，触发 Page Fault，内核才把相应文件页读入或映射已有 Page Cache。</p>
+<p>这叫 Demand Paging。它让大程序只为实际触达的页面付出内存和 I/O 成本。</p>
+<h2 id="section-第-4-步stack-是内核准备的启动信封">第 4 步：Stack 是内核准备的启动信封</h2>
+<p>新程序不能从空白环境开始。内核在用户栈顶部写入初始数据：</p>
+<pre><code class="language-text">argc
+argv[0] = &quot;./app&quot;
+argv[1] ...
+NULL
+envp[0] = &quot;PATH=...&quot;
+envp[1] ...
+NULL
+auxiliary vector
+</code></pre>
+<p>Auxiliary Vector，简称 <code>auxv</code>，向用户态 Runtime 提供内核信息，例如：</p>
+<ul>
+<li>Program Header 地址；</li>
+<li>页大小；</li>
+<li>真实与有效用户 ID；</li>
+<li>安全执行标志；</li>
+<li>随机数据地址；</li>
+<li>vDSO 地址；</li>
+<li>ELF 入口信息。</li>
+</ul>
+<p>这就是 <code>main(int argc, char **argv, char **envp)</code> 参数的源头。但内核不会直接调用 <code>main</code>，它只把寄存器和栈设置到 ABI 约定的初始状态，然后跳到 ELF 的入口地址。</p>
+<h2 id="section-第-5-步如果是动态链接程序先运行-dynamic-linker">第 5 步：如果是动态链接程序，先运行 Dynamic Linker</h2>
+<p>执行：</p>
+<pre><code class="language-bash">readelf -l ./app | grep INTERP
+</code></pre>
+<p>可能看到：</p>
+<pre><code class="language-text">/lib64/ld-linux-x86-64.so.2
+</code></pre>
+<p>ELF 的 <code>PT_INTERP</code> 告诉内核：这个程序需要用户态动态链接器。于是内核不仅映射 <code>app</code>，还映射 <code>ld-linux</code>，并把控制权交给动态链接器的入口。</p>
+<p>动态链接器需要：</p>
+<ol>
+<li>读取主程序的动态段；</li>
+<li>找到依赖库，如 <code>libc.so.6</code>；</li>
+<li>按搜索规则定位这些共享对象；</li>
+<li>用 <code>mmap</code> 把它们映射进地址空间；</li>
+<li>处理符号解析与重定位；</li>
+<li>初始化线程局部存储 TLS；</li>
+<li>执行依赖库的初始化函数；</li>
+<li>最终跳转到主程序入口。</li>
+</ol>
+<p>可以查看依赖：</p>
+<pre><code class="language-bash">ldd ./app
+</code></pre>
+<p>但对不可信文件不要随意使用某些会执行装载逻辑的工具；更安全的静态检查可使用 <code>readelf -d</code>。</p>
+<h2 id="section-第-6-步重定位把名字变成运行时地址">第 6 步：重定位把“名字”变成运行时地址</h2>
+<p>源代码调用 <code>printf</code> 时，编译器并不知道 <code>libc</code> 最终被 ASLR 放在哪个地址。</p>
+<p>动态链接器根据符号表和重定位表修补引用。常见机制包括：</p>
+<ul>
+<li>GOT：保存运行时解析出的地址；</li>
+<li>PLT：为外部函数调用提供跳板；</li>
+<li>Lazy Binding：第一次调用时再解析；</li>
+<li>Eager Binding：启动时完成解析。</li>
+</ul>
+<p>概念上：</p>
+<pre><code class="language-text">call printf
+  ↓
+PLT entry
+  ↓
+GOT 中是否已有地址？
+  ├─ 有：跳到 libc 的 printf
+  └─ 无：动态链接器解析后写入 GOT，再跳转
+</code></pre>
+<p>现代编译和安全选项会改变具体路径，例如 PIE、RELRO、<code>-fno-plt</code> 或立即绑定，但核心任务不变：把编译期尚未确定的引用，连接到本次进程中的真实地址。</p>
+<h2 id="section-第-7-步入口不是-main而是-start">第 7 步：入口不是 <code>main</code>，而是 <code>_start</code></h2>
+<p>ELF Header 中的入口通常指向 <code>_start</code>。它由 C Runtime 的启动代码提供，而不是普通 C 函数。</p>
+<p><code>_start</code> 所处环境还没有普通函数调用者。它要按照 ABI 取出内核准备的初始栈，完成必要对齐，然后调用类似：</p>
+<pre><code class="language-text">__libc_start_main(
+    main,
+    argc,
+    argv,
+    init,
+    fini,
+    ...
+)
+</code></pre>
+<p>运行时接着处理：</p>
+<ul>
+<li>libc 初始化；</li>
+<li>线程与 TLS 基础设施；</li>
+<li>栈保护随机值；</li>
+<li>全局构造函数；</li>
+<li>C++ 静态对象构造；</li>
+<li><code>atexit</code> 清理链；</li>
+<li>最终调用 <code>main(argc, argv, envp)</code>。</li>
+</ul>
+<p>所以 <code>main</code> 只是语言层约定的入口，不是内核眼中的入口。</p>
+<h2 id="section-heap-在什么时候出现">Heap 在什么时候出现</h2>
+<p>ELF 装载时，内核会建立数据段和 BSS，并维护传统 program break。用户看到的 Heap 通常由 Allocator 在运行时管理。</p>
+<p>当 <code>malloc</code> 第一次需要更多空间时，Allocator 可能：</p>
+<ul>
+<li>通过 <code>brk</code> 扩展传统 Heap；</li>
+<li>通过 <code>mmap</code> 获取独立虚拟内存区域；</li>
+<li>直接复用此前保留的空闲块。</li>
+</ul>
+<p>因此程序开始时地址空间中可以有“Heap 区域概念”，但并不意味着已经为未来所有动态对象分配了物理内存。</p>
+<h2 id="section-cpu-终于从哪里开始">CPU 终于从哪里开始</h2>
+<p>内核完成装载后，把当前线程的用户态指令指针设置为入口地址，栈指针设置为新栈顶部，然后从内核态返回用户态。</p>
+<p>CPU 接下来取到的第一条用户指令属于：</p>
+<ul>
+<li>动态链接器入口，如果程序动态链接；</li>
+<li>程序 <code>_start</code>，如果静态链接或动态链接器已交接。</li>
+</ul>
+<p>最终链路是：</p>
+<pre><code class="language-text">键盘回车
+→ Terminal 将字符交给 Shell
+→ Shell 解析 ./app
+→ fork / posix_spawn
+→ execve
+→ 内核校验并解析 ELF
+→ 建立虚拟地址空间
+→ 映射程序段、Stack、vDSO
+→ 启动 Dynamic Linker
+→ 映射共享库并重定位
+→ 跳到 _start
+→ C Runtime 初始化
+→ main
+</code></pre>
+<h2 id="section-用工具验证而不是只背流程">用工具验证，而不是只背流程</h2>
+<p>可以准备：</p>
+<pre><code class="language-c">#include &lt;stdio.h&gt;
+
+int main(int argc, char **argv) {
+    printf(&quot;pid started, argv[0]=%s\n&quot;, argv[0]);
+    return 0;
+}
+</code></pre>
+<p>然后观察：</p>
+<pre><code class="language-bash">gcc -O0 -g app.c -o app
+file ./app
+readelf -h -l -d ./app
+strace -f ./app
+cat /proc/$(pidof app)/maps
+</code></pre>
+<p>如果程序退出太快，可在 <code>main</code> 中暂时 <code>sleep</code>。<code>/proc/&lt;pid&gt;/maps</code> 会展示主程序、Heap、共享库、动态链接器、Stack 与 vDSO 的虚拟内存区域。</p>
+<p><code>strace</code> 看不到装载前所有内核内部步骤，因为它从系统调用边界观察；<code>readelf</code> 看文件结构；<code>/proc</code> 看运行时映射。三者拼起来，才接近完整事实。</p>
+<h2 id="section-启动程序其实是一次受控替换">“启动程序”其实是一次受控替换</h2>
+<p><code>./app</code> 并不是把整个文件复制进内存，然后从 <code>main</code> 开始。更准确的描述是：</p>
+<ol>
+<li>Shell 建立一个合适的进程执行环境；</li>
+<li><code>execve</code> 请求内核用 ELF 替换当前用户态映像；</li>
+<li>内核建立虚拟地址空间和初始栈；</li>
+<li>动态链接器补齐运行时依赖；</li>
+<li>C Runtime 把内核入口翻译成语言入口；</li>
+<li>页面在真正访问时才逐步进入物理内存。</li>
+</ol>
+<p>当 <code>main()</code> 开始时，这个进程已经携带 PID、页表、文件描述符、权限、信号状态、环境变量、共享库和运行时设施。代码第一行看似是起点，实际上是操作系统与语言 Runtime 完成交接后的终点。</p>
+
+    </article>
+  </main>
+
+  <footer class="site-footer article-footer">
+    <a href="../sections/computer-systems.html">计算机底层 / 代码如何运行</a>
+    <a href="https://github.com/yjd953/yjd953/blob/main/posts/program-startup.md">View source ↗</a>
+  </footer>
+  <script src="../assets/site.js" defer></script>
+</body>
+</html>

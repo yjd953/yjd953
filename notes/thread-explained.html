@@ -1,0 +1,266 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="连接 Thread、CPU Core、Scheduler、时间片、抢占与上下文切换。">
+  <meta name="theme-color" content="#f1f1ee">
+  <title>线程到底是什么？ — Dale Yang</title>
+  <link rel="stylesheet" href="../assets/site.css">
+</head>
+<body class="article-page">
+  <div class="reading-progress" id="readingProgress" aria-hidden="true"></div>
+
+  <header class="site-header">
+    <a class="wordmark" href="../" aria-label="Dale Yang home">DY<span>.</span></a>
+    <nav aria-label="Primary">
+      <a href="../sections/computer-systems.html">计算机底层</a>
+      <a href="https://github.com/yjd953">GitHub</a>
+    </nav>
+  </header>
+
+  <main class="article-layout">
+    <header class="article-masthead">
+      <a class="back-link" href="../sections/computer-systems.html">← 计算机底层</a>
+      <p class="kicker">02.06 / Thread / ZH</p>
+      <h1>线程到底是什么？</h1>
+      <p class="article-deck">连接 Thread、CPU Core、Scheduler、时间片、抢占与上下文切换。</p>
+    </header>
+
+    <article class="prose">
+      <p>一个服务同时处理网络请求、写日志、执行定时任务。我们常说“开几个线程并发做”，但线程并不是 CPU 里的一小块硬件，也不是一段函数。</p>
+<p>线程是操作系统可调度的一条执行流：它拥有足以让 CPU 暂停后再继续的执行上下文，并与同一进程中的其他线程共享大部分资源。</p>
+<h2 id="section-cpu-core-与-thread-先分开">CPU Core 与 Thread 先分开</h2>
+<p>物理 CPU 中有一个或多个 Core。每个 Core 真正执行机器指令。</p>
+<p>软件 Thread 是内核维护的任务。Scheduler 决定某个时刻让哪个 Thread 在哪个逻辑 CPU 上运行：</p>
+<pre><code class="language-text">Runnable Threads
+  T1 T2 T3 T4 T5
+       ↓ Scheduler
+CPU 0 运行 T2
+CPU 1 运行 T5
+</code></pre>
+<p>如果系统有两个逻辑 CPU，却有一百个 Runnable Thread，绝大多数线程只是排队，不是同时执行。</p>
+<p>Intel Hyper-Threading 或 SMT 中的 “hardware thread” 是每个 Core 暴露出的逻辑执行上下文，与操作系统线程不是同一个概念。Scheduler 可以把软件线程放到逻辑 CPU 上运行。</p>
+<h2 id="section-线程保存了什么">线程保存了什么</h2>
+<p>要让一段执行暂停后继续，至少要保存：</p>
+<ul>
+<li>Instruction Pointer：下一条指令地址；</li>
+<li>Stack Pointer：当前栈顶；</li>
+<li>通用寄存器；</li>
+<li>标志与部分向量寄存器；</li>
+<li>调度状态与优先级；</li>
+<li>内核栈；</li>
+<li>线程局部存储信息；</li>
+<li>信号掩码等线程级状态。</li>
+</ul>
+<p>这些信息构成线程的执行上下文。</p>
+<p>线程恢复时，CPU 寄存器被重新装入，指令指针回到原位置。对程序来说，好像此前只是“停顿了一会儿”。</p>
+<h2 id="section-同一进程的线程共享什么">同一进程的线程共享什么</h2>
+<p>线程不是独立进程。它们通常共享：</p>
+<pre><code class="language-text">虚拟地址空间
+代码段
+全局变量
+Heap
+文件描述符
+打开的 Socket
+大部分进程级权限
+</code></pre>
+<p>各自拥有：</p>
+<pre><code class="language-text">寄存器上下文
+用户 Stack
+内核 Stack
+Thread ID
+调度状态
+Thread-local Storage
+</code></pre>
+<p>这解释了线程的两个特征：</p>
+<ol>
+<li>共享数据很方便，传递指针即可；</li>
+<li>一个错误写入也能破坏整个进程。</li>
+</ol>
+<p>进程间通信需要显式 IPC；线程间通信经常只是访问同一地址，但必须处理竞态。</p>
+<h2 id="section-一次线程创建发生什么">一次线程创建发生什么</h2>
+<p>POSIX 程序调用：</p>
+<pre><code class="language-c">pthread_create(&amp;thread, NULL, worker, arg);
+</code></pre>
+<p>用户态线程库会：</p>
+<ol>
+<li>分配线程控制数据；</li>
+<li>为新线程准备用户栈与 Guard Page；</li>
+<li>设置 TLS；</li>
+<li>调用内核接口创建共享地址空间的新任务；</li>
+<li>指定新线程从启动包装函数开始；</li>
+<li>包装函数再调用 <code>worker(arg)</code>。</li>
+</ol>
+<p>Linux 内核并不把“进程”和“线程”实现为完全无关的两种对象。它们都基于 Task，只是通过 Clone Flags 决定共享地址空间、文件描述符、信号处理等资源的程度。</p>
+<h2 id="section-thread-stack-为什么必须独立">Thread Stack 为什么必须独立</h2>
+<p>假设两个线程同时调用：</p>
+<pre><code class="language-c">int f(int x) {
+    int y = x + 1;
+    return g(y);
+}
+</code></pre>
+<p>每个线程都需要自己的：</p>
+<ul>
+<li>返回地址；</li>
+<li>局部变量；</li>
+<li>Spill 值；</li>
+<li>调用帧。</li>
+</ul>
+<p>如果共享同一个栈，一个线程的函数调用会覆盖另一个线程的返回路径。</p>
+<p>传统系统线程栈常预留较大虚拟地址范围，并设置 Guard Page 捕获越界。预留 8MB 虚拟空间不代表立即占用 8MB 物理内存，页面仍可按需分配。</p>
+<h2 id="section-scheduler-调度的到底是什么">Scheduler 调度的到底是什么</h2>
+<p>内核调度器维护可运行实体。线程只有在 Runnable 时才有资格获得 CPU。</p>
+<p>典型状态变化：</p>
+<pre><code class="language-text">new
+ ↓
+runnable ←──────────────┐
+ ↓ 被调度               │ 唤醒
+running                 │
+ ├─ 时间片/抢占 → runnable
+ ├─ 等待 I/O ─→ sleeping ┘
+ └─ 退出 → dead
+</code></pre>
+<p>如果线程调用阻塞式 <code>read</code>，数据尚未到达，内核会把它放入等待队列并调度其他线程。网卡收到数据后，内核唤醒它，使其再次进入 Runnable。</p>
+<p>线程不是在阻塞期间“占着 CPU 等”，它通常不占 CPU，但仍占用栈和内核状态等资源。</p>
+<h2 id="section-time-slice-是什么">Time Slice 是什么</h2>
+<p>在抢占式多任务系统中，线程不能无限占据 CPU。Scheduler 根据调度策略、优先级和运行历史分配执行机会。</p>
+<p>“时间片”是有用的入门模型：</p>
+<pre><code class="language-text">T1 运行一段时间
+→ 时钟中断或调度点
+→ T2 运行
+→ T3 运行
+→ T1 继续
+</code></pre>
+<p>现代 Linux CFS 或 EEVDF 等调度策略并不只是给所有线程固定相同毫秒数，但目标仍包括公平性、响应性和吞吐。</p>
+<p>线程何时被切走可能因为：</p>
+<ul>
+<li>时间预算耗尽；</li>
+<li>更高优先级任务就绪；</li>
+<li>当前线程主动让出；</li>
+<li>当前线程阻塞；</li>
+<li>CPU 需要处理特定中断或调度事件。</li>
+</ul>
+<h2 id="section-preemption线程可能在任意指令附近暂停">Preemption：线程可能在任意指令附近暂停</h2>
+<p>抢占意味着程序不能假设：</p>
+<pre><code class="language-text">读取变量
+修改变量
+写回变量
+</code></pre>
+<p>会作为不可分割整体完成。</p>
+<p>两个线程执行：</p>
+<pre><code class="language-c">counter++;
+</code></pre>
+<p>底层可能是：</p>
+<pre><code class="language-text">T1 load counter = 10
+T2 load counter = 10
+T1 add → 11, store
+T2 add → 11, store
+</code></pre>
+<p>最终是 11，不是 12。这是 Lost Update。</p>
+<p>锁、原子操作和消息传递不是为了“让多个线程更快”，而是为了在可能交错的执行中建立正确顺序。</p>
+<h2 id="section-context-switch-到底切换什么">Context Switch 到底切换什么</h2>
+<p>当 CPU 从线程 A 切到线程 B，内核需要：</p>
+<ol>
+<li>保存 A 的寄存器和指令位置；</li>
+<li>更新 A 的调度状态；</li>
+<li>选择 B；</li>
+<li>切换必要的地址空间或安全状态；</li>
+<li>恢复 B 的寄存器；</li>
+<li>从 B 上次停止处继续。</li>
+</ol>
+<p>如果 A 和 B 属于同一进程，通常共享页表，地址空间切换成本可能较低；若属于不同进程，可能涉及页表上下文变化。带 PCID/ASID 的现代 CPU 可以减少 TLB 全量失效，但不是零成本。</p>
+<p>真正昂贵的常常不只是保存几十个寄存器，而是间接影响：</p>
+<ul>
+<li>Cache 热数据被挤出；</li>
+<li>TLB 命中率下降；</li>
+<li>分支预测历史改变；</li>
+<li>CPU Pipeline 被扰动；</li>
+<li>线程迁移到另一 Core 后失去局部性。</li>
+</ul>
+<p>因此“上下文切换耗时多少”没有一个固定常数，它取决于工作集、架构和调度环境。</p>
+<h2 id="section-多线程为什么可能更快">多线程为什么可能更快</h2>
+<h3 id="section-利用多核">利用多核</h3>
+<p>独立 CPU 密集任务可以在不同 Core 上并行：</p>
+<pre><code class="language-text">Core 0 → Thread A
+Core 1 → Thread B
+Core 2 → Thread C
+</code></pre>
+<h3 id="section-隐藏-io-等待">隐藏 I/O 等待</h3>
+<p>一个线程等待网络时，另一个线程可以运行。</p>
+<h3 id="section-隔离阻塞操作">隔离阻塞操作</h3>
+<p>某个库只有阻塞接口，可以放入独立线程，避免阻塞事件循环。</p>
+<p>但线程数超过有用并行度后，会增加调度、内存和同步成本。</p>
+<h2 id="section-多线程为什么也可能更慢">多线程为什么也可能更慢</h2>
+<h3 id="section-锁竞争">锁竞争</h3>
+<p>多个线程争夺同一 Mutex，最后仍串行执行，还多了阻塞和唤醒。</p>
+<h3 id="section-cache-line-争用">Cache Line 争用</h3>
+<p>两个核心频繁写同一 Cache Line，会触发一致性流量。即使它们写不同变量，只要变量落在同一 Cache Line，也可能发生 False Sharing。</p>
+<h3 id="section-过度订阅">过度订阅</h3>
+<p>8 个逻辑 CPU 上启动 1000 个持续计算线程，只会产生大量切换，不会获得 1000 倍算力。</p>
+<h3 id="section-内存压力">内存压力</h3>
+<p>每个线程需要 Stack 和内核元数据，大量线程会消耗虚拟地址、物理页和调度资源。</p>
+<h2 id="section-用户线程内核线程与-mn">用户线程、内核线程与 M:N</h2>
+<p>“线程”还可能指不同实现层。</p>
+<h3 id="section-11-系统线程">1:1 系统线程</h3>
+<p>一个用户可见线程对应一个内核调度任务。现代 Linux pthread 常采用这种模型。内核能直接把不同线程放到多核。</p>
+<h3 id="section-用户态协程">用户态协程</h3>
+<p>Runtime 在少量系统线程上调度大量协程。内核只看到承载它们的线程，不知道每个协程。</p>
+<h3 id="section-mn">M:N</h3>
+<p>M 个用户态任务映射到 N 个系统线程。Go Goroutine 就是典型例子之一。Go Runtime 调度 Goroutine，内核调度承载它们的线程。</p>
+<p>两层调度器需要协作处理阻塞系统调用、抢占与多核并行。</p>
+<h2 id="section-线程到底是-cpu-的什么东西">线程到底是 CPU 的什么东西</h2>
+<p>最准确的回答是：</p>
+<blockquote>
+<p>线程不是 CPU 的组成部分，而是操作系统交给某个逻辑 CPU 执行的一份可暂停、可恢复的指令上下文。</p>
+</blockquote>
+<p>从 CPU 的瞬时视角看，只有当前寄存器状态和正在取出的指令。所谓“这是线程 1842”，是内核在调度和上下文切换时维护的身份。</p>
+<p>CPU 不会永久属于某个线程。一个线程也可能在生命周期中迁移到不同 Core：</p>
+<pre><code class="language-text">10:00:00  Thread A 在 CPU 2
+10:00:01  Thread A 睡眠
+10:00:02  Thread A 在 CPU 5 恢复
+</code></pre>
+<p>CPU Affinity 可以限制这种迁移，用于改善 Cache 局部性或满足实时需求。</p>
+<h2 id="section-如何观察线程与调度">如何观察线程与调度</h2>
+<p>Linux 中可以：</p>
+<pre><code class="language-bash">ps -eLo pid,tid,psr,stat,comm
+top -H -p &lt;pid&gt;
+ls /proc/&lt;pid&gt;/task
+cat /proc/&lt;pid&gt;/task/&lt;tid&gt;/status
+</code></pre>
+<p>其中：</p>
+<ul>
+<li>PID/TID 标识进程与线程；</li>
+<li>PSR 表示最近运行的 CPU；</li>
+<li>STAT 展示调度状态。</li>
+</ul>
+<p>进一步使用：</p>
+<pre><code class="language-bash">perf stat -e context-switches,cpu-migrations ./app
+perf sched record ./app
+perf sched timehist
+</code></pre>
+<p>可以观察上下文切换、CPU 迁移和调度延迟。权限和内核配置可能限制部分事件。</p>
+<h2 id="section-线程是一条被调度的时间线">线程是一条被调度的时间线</h2>
+<p>线程将三个世界连接起来：</p>
+<pre><code class="language-text">程序世界：
+  函数调用、局部变量、共享对象
+
+内核世界：
+  Task、优先级、等待队列、CPU Affinity
+
+CPU 世界：
+  寄存器、指令指针、Core 与 Cache
+</code></pre>
+<p>它不是“同时运行”的保证，而是一个可以竞争 CPU、阻塞、唤醒、迁移和恢复的执行实体。</p>
+<p>理解线程以后，并发问题就不再只是“多个函数一起跑”。它真正讨论的是：多个可被任意交错的执行上下文，如何共享同一个地址空间，并在有限 CPU Core 上保持正确与高效。</p>
+
+    </article>
+  </main>
+
+  <footer class="site-footer article-footer">
+    <a href="../sections/computer-systems.html">计算机底层 / 进程、线程与内存</a>
+    <a href="https://github.com/yjd953/yjd953/blob/main/posts/thread-explained.md">View source ↗</a>
+  </footer>
+  <script src="../assets/site.js" defer></script>
+</body>
+</html>

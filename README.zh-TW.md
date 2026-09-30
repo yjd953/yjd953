@@ -17,27 +17,16 @@
 [程式碼儲存庫](https://github.com/yjd953?tab=repositories) ·
 [聯絡我](https://github.com/yjd953/yjd953/issues/new?title=Hello%20Dale)
 
-## 文章
+## 探索
 
-**01 / Agent 系統**<br>
-[From Demo to Production: Four Reliability Pillars for Agents](https://yjd953.github.io/yjd953/notes/agent-reliability.html)<br>
-明確狀態、有界執行、結果驗證、失敗復原與上線檢查。
+**01 / [Agent 探索](https://yjd953.github.io/yjd953/sections/agent.html)**<br>
+從 Agent Loop 出發，深入工具、Memory、Runtime、MCP、Trace、除錯與生產可靠性。
 
-**02 / 工具調用**<br>
-[A Practical Tool-Use Checklist](https://yjd953.github.io/yjd953/notes/tool-use-checklist.html)<br>
-系統講解工具契約、授權、冪等、錯誤語意、結果驗證與隱私保護。
+**02 / [計算機底層](https://yjd953.github.io/yjd953/sections/computer-systems.html)**<br>
+從程式啟動與 CPU 指令出發，深入行程、執行緒、記憶體、網路、編譯器、檔案系統、SSD 與資料庫核心。
 
-**03 / Agent 評測**<br>
-[Trace-Native Evaluation: From a Score to a Release Gate](https://yjd953.github.io/yjd953/notes/trace-native-evaluation.html)<br>
-將離線重播、軌跡診斷、線上回饋與風險發布門檻連接成評測閉環。
-
-**04 / 可觀測性**<br>
-[Agent Observability: Metrics That Expose Failure](https://yjd953.github.io/yjd953/notes/agent-observability.html)<br>
-圍繞真實完成率、執行輪次、Token 成本、延遲、工具與人工介入建立指標。
-
-**05 / 後端**<br>
-[後端開發八股文指南](https://yjd953.github.io/yjd953/notes/backend-interview-guide.html)<br>
-涵蓋 Java、Go、JVM、Redis、MySQL、MQ、網路與分散式系統，共九個模組、90 個高頻知識點。
+**03 / [後端八股](https://yjd953.github.io/yjd953/sections/backend.html)**<br>
+涵蓋 Java、Go、JVM、Redis、MySQL、MQ、網路與分散式系統。
 
 ## 動態
 

@@ -19,27 +19,16 @@ Nachweise hinterlassen, um ihre Abläufe nachvollziehbar zu machen.
 [Repositories](https://github.com/yjd953?tab=repositories) ·
 [Kontakt](https://github.com/yjd953/yjd953/issues/new?title=Hello%20Dale)
 
-## Artikel
+## Themen
 
-**01 / Agent-Systeme**<br>
-[From Demo to Production: Four Reliability Pillars for Agents](https://yjd953.github.io/yjd953/notes/agent-reliability.html)<br>
-Expliziter Zustand, begrenzte Ausführung, verifizierte Effekte, Wiederherstellung und Release-Prüfungen.
+**01 / [Agent-Erkundung](https://yjd953.github.io/yjd953/sections/agent.html)**<br>
+Agent Loops, Tools, Memory, Runtime, MCP, Tracing, Debugging und Produktionszuverlässigkeit.
 
-**02 / Tooling**<br>
-[A Practical Tool-Use Checklist](https://yjd953.github.io/yjd953/notes/tool-use-checklist.html)<br>
-Tool-Verträge, Autorisierung, Idempotenz, Fehlersemantik, Verifikation und Datenschutz.
+**02 / [Computersysteme](https://yjd953.github.io/yjd953/sections/computer-systems.html)**<br>
+Programmausführung, CPU und Speicher, Prozesse, Netzwerke, Compiler, Dateisysteme, SSDs und Datenbank-Interna.
 
-**03 / Evaluation**<br>
-[Trace-Native Evaluation: From a Score to a Release Gate](https://yjd953.github.io/yjd953/notes/trace-native-evaluation.html)<br>
-Offline-Replay, Trace-Diagnose, Produktionsfeedback und risikobasierte Release-Gates.
-
-**04 / Observability**<br>
-[Agent Observability: Metrics That Expose Failure](https://yjd953.github.io/yjd953/notes/agent-observability.html)<br>
-Verifizierte Ergebnisse, Ausführungstiefe, Token-Kosten, Latenz, Tool-Zustand und menschliche Kontrolle.
-
-**05 / Backend**<br>
-[后端开发八股文指南](https://yjd953.github.io/yjd953/notes/backend-interview-guide.html)<br>
-90 häufige Themen aus Java, Go, JVM, Redis, MySQL, MQ, Netzwerken und verteilten Systemen.
+**03 / [Backend-Grundlagen](https://yjd953.github.io/yjd953/sections/backend.html)**<br>
+Java, Go, JVM, Redis, MySQL, MQ, Netzwerke und verteilte Systeme.
 
 ## Aktivität
 
