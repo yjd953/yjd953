@@ -22,13 +22,21 @@ what happened.
 
 **01 / Agent systems**<br>
 [From Demo to Production: Four Reliability Pillars for Agents](https://yjd953.github.io/yjd953/notes/agent-reliability.html)<br>
-Explicit state, contract-first tools, layered evaluation, and operational control.
+Explicit state, bounded execution, verified effects, recovery, and release checks.
 
 **02 / Tooling**<br>
 [A Practical Tool-Use Checklist](https://yjd953.github.io/yjd953/notes/tool-use-checklist.html)<br>
-A compact release checklist for tool contracts, safety, execution, and verification.
+Tool contracts, authorization, idempotency, failure semantics, verification, and privacy.
 
-**03 / Backend**<br>
+**03 / Evaluation**<br>
+[Trace-Native Evaluation: From a Score to a Release Gate](https://yjd953.github.io/yjd953/notes/trace-native-evaluation.html)<br>
+Offline replay, trace diagnosis, production feedback, and risk-based release gates.
+
+**04 / Observability**<br>
+[Agent Observability: Metrics That Expose Failure](https://yjd953.github.io/yjd953/notes/agent-observability.html)<br>
+Verified outcomes, execution depth, token cost, latency, tool health, and human control.
+
+**05 / Backend**<br>
 [后端开发八股文指南](https://yjd953.github.io/yjd953/notes/backend-interview-guide.html)<br>
 Java、Go、JVM、Redis、MySQL、MQ、网络与分布式系统，九个模块、90 个高频知识点。
 

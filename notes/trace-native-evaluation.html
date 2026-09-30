@@ -1,0 +1,425 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Connect offline replay, trace diagnosis, production signals, and release gates.">
+  <meta name="theme-color" content="#f1f1ee">
+  <title>Trace-Native Evaluation — Dale Yang</title>
+  <link rel="stylesheet" href="../assets/site.css">
+</head>
+<body class="article-page">
+  <div class="reading-progress" id="readingProgress" aria-hidden="true"></div>
+
+  <header class="site-header">
+    <a class="wordmark" href="../" aria-label="Back to writing index">DY<span>.</span></a>
+    <nav aria-label="Primary">
+      <a href="../">All notes</a>
+      <a href="https://github.com/yjd953">GitHub</a>
+    </nav>
+  </header>
+
+  <main class="article-layout">
+    <header class="article-masthead">
+      <a class="back-link" href="../">← All notes</a>
+      <p class="kicker">03 / Evaluation / EN</p>
+      <h1>Trace-Native Evaluation: From a Score to a Release Gate</h1>
+      <p class="article-deck">Connect offline replay, trace diagnosis, production signals, and release gates.</p>
+    </header>
+
+    <article class="prose">
+      <p>Agent quality is not a property of the final answer alone. It is a property of the entire execution path: which context was selected, why a tool was chosen, whether arguments were correct, what external state changed, and whether the system recovered safely.</p>
+<p>That path is the <strong>trace</strong>. A trace-native evaluation system treats it as first-class test data rather than debug exhaust.</p>
+<pre><code class="language-text">task quality
+  = outcome
+  × process integrity
+  × operational reliability
+</code></pre>
+<p>This article describes an evaluation stack that connects offline replay, trace diagnosis, production signals, and release decisions.</p>
+<h2 id="section-1-why-final-answer-scoring-is-insufficient">1. Why final-answer scoring is insufficient</h2>
+<p>Consider two agents asked to update an incident ticket.</p>
+<p>Agent A retrieves the correct incident, verifies the requested severity, updates exactly one field, reads the ticket again, and confirms the new state.</p>
+<p>Agent B guesses the ticket ID from conversation history, retries after a timeout, updates two tickets, and happens to return the same final sentence as Agent A.</p>
+<p>A judge that sees only the answer may give both runs the same score. Operationally, they are completely different.</p>
+<p>Evaluation therefore needs three dimensions:</p>
+<div class="table-scroll"><table>
+<thead>
+<tr>
+<th>Dimension</th>
+<th>What it measures</th>
+<th>Typical failure</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Outcome</td>
+<td>Whether the user&#39;s goal was achieved</td>
+<td>Ticket remains unchanged</td>
+</tr>
+<tr>
+<td>Process integrity</td>
+<td>Whether evidence and actions were correct</td>
+<td>Wrong ticket selected</td>
+</tr>
+<tr>
+<td>Operational reliability</td>
+<td>Whether execution stayed within constraints</td>
+<td>Duplicate update or runaway retries</td>
+</tr>
+</tbody></table></div>
+<p>Multiplication is a useful mental model. A polished answer cannot compensate for an unsafe process, and a perfect trace cannot compensate for an unmet goal.</p>
+<h3 id="section-define-the-task-before-judging-it">Define the task before judging it</h3>
+<p>Each evaluation case should contain:</p>
+<ul>
+<li>a normalized user goal;</li>
+<li>the initial external state;</li>
+<li>relevant permissions and policy;</li>
+<li>allowed and forbidden actions;</li>
+<li>expected final-state invariants;</li>
+<li>acceptable alternative paths;</li>
+<li>latency, token, and tool budgets.</li>
+</ul>
+<p>Without this task envelope, evaluators often reward plausible text rather than successful work.</p>
+<h2 id="section-2-build-a-four-layer-evaluation-stack">2. Build a four-layer evaluation stack</h2>
+<p>No evaluator is reliable enough to own the entire decision. Use layers with different cost and certainty.</p>
+<h3 id="section-layer-1-deterministic-checks">Layer 1: deterministic checks</h3>
+<p>Deterministic checks are the cheapest and strongest where the expected behavior is explicit:</p>
+<ul>
+<li>JSON Schema validity;</li>
+<li>permission decisions;</li>
+<li>exact IDs and enum values;</li>
+<li>required citations;</li>
+<li>duplicate side effects;</li>
+<li>final-state invariants;</li>
+<li>step, token, latency, and cost budgets;</li>
+<li>forbidden tool calls.</li>
+</ul>
+<p>Run these checks on every evaluation case and, where inexpensive, on every production trace.</p>
+<h3 id="section-layer-2-model-based-judges">Layer 2: model-based judges</h3>
+<p>Use model judges for semantic properties that are difficult to encode:</p>
+<ul>
+<li>whether the response addresses the user&#39;s intent;</li>
+<li>whether a plan is coherent;</li>
+<li>whether a summary preserves critical information;</li>
+<li>whether cited evidence supports a claim;</li>
+<li>whether a clarification was necessary.</li>
+</ul>
+<p>A judge needs a rubric, not a vague question such as &quot;Is this response good?&quot;</p>
+<pre><code class="language-text">Score 0: goal not achieved or unsafe action taken
+Score 1: partial progress, major correction required
+Score 2: goal achieved with a process defect
+Score 3: goal achieved, evidence and process are sound
+</code></pre>
+<p>Calibrate judges against human-labeled examples. Track disagreement by task type and judge version. A model judge is another model dependency, not ground truth.</p>
+<h3 id="section-layer-3-trace-review">Layer 3: trace review</h3>
+<p>Trace review asks whether the path was justified:</p>
+<ul>
+<li>Was the selected context relevant and current?</li>
+<li>Was the correct tool chosen?</li>
+<li>Were arguments supported by evidence?</li>
+<li>Did retries follow the error contract?</li>
+<li>Were side effects verified?</li>
+<li>Was a human checkpoint used at the right moment?</li>
+</ul>
+<p>Trace review can be deterministic, model-based, or human. The important point is that steps remain addressable so a failure can be assigned to a stage.</p>
+<h3 id="section-layer-4-online-outcomes">Layer 4: online outcomes</h3>
+<p>Production signals reveal value that offline tests cannot fully simulate:</p>
+<ul>
+<li>task completion and abandonment;</li>
+<li>user correction rate;</li>
+<li>human takeover rate;</li>
+<li>repeated-action rate;</li>
+<li>downstream rollback or complaint;</li>
+<li>time to accepted outcome;</li>
+<li>cost per accepted task;</li>
+<li>retention after agent-assisted workflows.</li>
+</ul>
+<p>Online metrics are real but delayed and confounded. Use them to validate offline assumptions, not as the only quality signal.</p>
+<h2 id="section-3-design-traces-for-evaluation">3. Design traces for evaluation</h2>
+<p>A trace should be a structured event sequence, not a giant prompt dump.</p>
+<pre><code class="language-json">{
+  &quot;task_id&quot;: &quot;task_8f2a&quot;,
+  &quot;task_type&quot;: &quot;incident_update&quot;,
+  &quot;versions&quot;: {
+    &quot;model&quot;: &quot;model-2026-09&quot;,
+    &quot;prompt&quot;: &quot;incident-agent-v14&quot;,
+    &quot;policy&quot;: &quot;prod-policy-v8&quot;,
+    &quot;tools&quot;: &quot;toolset-v23&quot;
+  },
+  &quot;budget&quot;: {
+    &quot;max_steps&quot;: 12,
+    &quot;max_tokens&quot;: 18000,
+    &quot;deadline_ms&quot;: 45000
+  },
+  &quot;steps&quot;: [],
+  &quot;outcome&quot;: {
+    &quot;status&quot;: &quot;completed&quot;,
+    &quot;verified&quot;: true
+  }
+}
+</code></pre>
+<p>Each step should capture:</p>
+<ul>
+<li>state before the decision;</li>
+<li>context references and provenance;</li>
+<li>selected action and normalized arguments;</li>
+<li>policy result;</li>
+<li>tool timing, error category, and retry count;</li>
+<li>state after execution;</li>
+<li>verification evidence;</li>
+<li>cumulative budgets.</li>
+</ul>
+<h3 id="section-record-evidence-references-not-unlimited-payloads">Record evidence references, not unlimited payloads</h3>
+<p>Full tool responses can contain personal data, credentials, and large documents. Store bounded summaries in the trace and keep sensitive raw evidence behind separate access controls.</p>
+<p>Useful techniques:</p>
+<ul>
+<li>field allowlists;</li>
+<li>irreversible redaction before emission;</li>
+<li>content hashes for equality checks;</li>
+<li>object references with retention policies;</li>
+<li>sampling based on failure class;</li>
+<li>separate operational and research datasets.</li>
+</ul>
+<p>Trace quality and privacy are part of the same design.</p>
+<h2 id="section-4-score-at-the-right-granularity">4. Score at the right granularity</h2>
+<p>A single task score is useful for dashboards but insufficient for diagnosis. Keep component metrics.</p>
+<h3 id="section-context-metrics">Context metrics</h3>
+<ul>
+<li>retrieval recall on required evidence;</li>
+<li>irrelevant-context rate;</li>
+<li>stale-evidence rate;</li>
+<li>citation correctness;</li>
+<li>tokens spent per useful source.</li>
+</ul>
+<h3 id="section-decision-metrics">Decision metrics</h3>
+<ul>
+<li>correct tool selection;</li>
+<li>unnecessary tool-call rate;</li>
+<li>argument validity;</li>
+<li>clarification precision;</li>
+<li>forbidden-action rate.</li>
+</ul>
+<h3 id="section-execution-metrics">Execution metrics</h3>
+<ul>
+<li>tool success rate by version;</li>
+<li>retry and timeout rate;</li>
+<li>idempotency conflict rate;</li>
+<li>unknown-outcome rate;</li>
+<li>verification failure rate.</li>
+</ul>
+<h3 id="section-outcome-metrics">Outcome metrics</h3>
+<ul>
+<li>verified task completion;</li>
+<li>user correction;</li>
+<li>human takeover;</li>
+<li>rollback;</li>
+<li>latency and cost per accepted task.</li>
+</ul>
+<p>Component metrics prevent a model improvement from hiding a tool regression or a faster tool from hiding worse task completion.</p>
+<h2 id="section-5-turn-production-failures-into-regression-cases">5. Turn production failures into regression cases</h2>
+<p>The most valuable evaluation set grows from real failures.</p>
+<pre><code class="language-text">collect
+  → classify
+  → minimize
+  → label invariants
+  → replay
+  → gate release
+</code></pre>
+<h3 id="section-collect">Collect</h3>
+<p>Sample traces with meaningful signals:</p>
+<ul>
+<li>user corrections;</li>
+<li>verification failures;</li>
+<li>repeated actions;</li>
+<li>policy blocks;</li>
+<li>unusually high cost or step count;</li>
+<li>human takeover;</li>
+<li>low-confidence outcomes.</li>
+</ul>
+<h3 id="section-classify">Classify</h3>
+<p>Use a stable failure taxonomy:</p>
+<pre><code class="language-text">CONTEXT_MISSING
+CONTEXT_STALE
+TOOL_SELECTION
+ARGUMENT_ERROR
+AUTHORIZATION
+EXECUTION_TRANSIENT
+PARTIAL_SIDE_EFFECT
+VERIFICATION_MISSING
+LOOP_OR_STAGNATION
+RESPONSE_QUALITY
+</code></pre>
+<p>The taxonomy should identify the owning system component. &quot;The model was bad&quot; is not an actionable class.</p>
+<h3 id="section-minimize">Minimize</h3>
+<p>Remove unrelated history and tool data until the failure still reproduces. A minimal case is easier to understand, cheaper to run, and less likely to contain sensitive information.</p>
+<p>Preserve:</p>
+<ul>
+<li>necessary context;</li>
+<li>relevant external state;</li>
+<li>policy configuration;</li>
+<li>tool behavior;</li>
+<li>the smallest prompt sequence that triggers the failure.</li>
+</ul>
+<h3 id="section-label-invariants">Label invariants</h3>
+<p>Prefer outcome and process invariants over one expected sentence:</p>
+<pre><code class="language-yaml">must:
+  - select incident INC-1842
+  - update severity to SEV-2
+  - verify the final ticket
+must_not:
+  - change owner
+  - update any other incident
+budget:
+  tool_calls: 4
+  wall_time_ms: 12000
+</code></pre>
+<p>This allows multiple valid reasoning paths while protecting the important boundaries.</p>
+<h2 id="section-6-make-replay-realistic">6. Make replay realistic</h2>
+<p>An agent evaluation is only trustworthy when tool and state behavior resemble production.</p>
+<p>Choose the replay level deliberately:</p>
+<div class="table-scroll"><table>
+<thead>
+<tr>
+<th>Level</th>
+<th>Environment</th>
+<th>Use</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Mock</td>
+<td>Fixed tool responses</td>
+<td>Fast contract and prompt tests</td>
+</tr>
+<tr>
+<td>Simulator</td>
+<td>Stateful local services</td>
+<td>Multi-step plans and side effects</td>
+</tr>
+<tr>
+<td>Shadow</td>
+<td>Production reads, blocked writes</td>
+<td>Real retrieval and routing</td>
+</tr>
+<tr>
+<td>Canary</td>
+<td>Limited real traffic</td>
+<td>Final online validation</td>
+</tr>
+</tbody></table></div>
+<p>Mocks are excellent for deterministic edge cases but hide timing, pagination, permission drift, and eventual consistency. Stateful simulation catches more process failures. Shadow and canary tests reveal integration behavior but require stronger privacy and safety controls.</p>
+<h3 id="section-freeze-what-matters">Freeze what matters</h3>
+<p>To compare releases, record:</p>
+<ul>
+<li>model and inference parameters;</li>
+<li>prompt and policy versions;</li>
+<li>tool schemas and adapters;</li>
+<li>retrieval corpus snapshot or document versions;</li>
+<li>simulator seed and clock;</li>
+<li>evaluator version.</li>
+</ul>
+<p>Without versioned inputs, a changed score may not be attributable to the code under test.</p>
+<h2 id="section-7-use-release-gates-not-score-theater">7. Use release gates, not score theater</h2>
+<p>An aggregate score makes a clean chart but can hide severe regressions. Release gates should reflect risk.</p>
+<p>Example:</p>
+<pre><code class="language-yaml">release:
+  required:
+    critical_task_success: &quot;&gt;= 0.97&quot;
+    high_risk_wrong_action: &quot;== 0&quot;
+    duplicate_side_effect: &quot;== 0&quot;
+    verification_coverage: &quot;&gt;= 0.995&quot;
+    p95_latency_regression: &quot;&lt;= 10%&quot;
+    cost_per_success_regression: &quot;&lt;= 8%&quot;
+  segmented_by:
+    - task_type
+    - risk_class
+    - tool
+    - locale
+</code></pre>
+<p>Important rules:</p>
+<ul>
+<li>compare against the current production baseline;</li>
+<li>gate critical slices separately;</li>
+<li>use confidence intervals for noisy metrics;</li>
+<li>require explanations for newly observed failure modes;</li>
+<li>attach a rollback plan to every canary;</li>
+<li>fail closed on safety invariants.</li>
+</ul>
+<p>A release may improve average quality while regressing one high-risk workflow. Segmented gates make that visible.</p>
+<h2 id="section-8-diagnose-changes-with-paired-traces">8. Diagnose changes with paired traces</h2>
+<p>When a candidate release fails a case that the baseline passes, compare the runs step by step:</p>
+<ol>
+<li>Did they retrieve the same evidence?</li>
+<li>Did they normalize the same task state?</li>
+<li>Where did action selection diverge?</li>
+<li>Did policy or tool versions differ?</li>
+<li>Did one run consume more budget before the divergence?</li>
+<li>Did verification catch the problem?</li>
+</ol>
+<p>This converts a score regression into an engineering hypothesis.</p>
+<pre><code class="language-text">observed:
+  candidate selected update_user instead of update_ticket
+
+evidence:
+  both tools share argument name &quot;id&quot;
+  tool descriptions omit resource type in first sentence
+
+fix:
+  rename arguments to user_id and ticket_id
+  add negative selection cases
+</code></pre>
+<p>The best evaluation result is not &quot;candidate scored 2.7.&quot; It is a reproducible explanation that leads to a targeted fix.</p>
+<h2 id="section-9-a-practical-rollout">9. A practical rollout</h2>
+<h3 id="section-phase-1-establish-trace-integrity">Phase 1: establish trace integrity</h3>
+<ul>
+<li>assign stable task and step IDs;</li>
+<li>version model, prompts, tools, and policy;</li>
+<li>capture typed outcomes and verification;</li>
+<li>redact sensitive fields before storage.</li>
+</ul>
+<h3 id="section-phase-2-deterministic-regression">Phase 2: deterministic regression</h3>
+<ul>
+<li>add schema and policy checks;</li>
+<li>define final-state invariants;</li>
+<li>create cases for duplicate actions, timeouts, and budget exhaustion;</li>
+<li>run on every relevant change.</li>
+</ul>
+<h3 id="section-phase-3-semantic-evaluation">Phase 3: semantic evaluation</h3>
+<ul>
+<li>create narrow judge rubrics;</li>
+<li>label a calibration set;</li>
+<li>measure agreement and drift;</li>
+<li>segment results by task type.</li>
+</ul>
+<h3 id="section-phase-4-production-feedback-loop">Phase 4: production feedback loop</h3>
+<ul>
+<li>sample failed and corrected tasks;</li>
+<li>classify and minimize traces;</li>
+<li>promote them into the regression suite;</li>
+<li>gate releases on critical slices.</li>
+</ul>
+<h2 id="section-release-checklist">Release checklist</h2>
+<ul>
+<li><input disabled type="checkbox"> Every case defines a task and initial state.</li>
+<li><input disabled type="checkbox"> Success is expressed as final-state invariants.</li>
+<li><input disabled type="checkbox"> Outcome, process, and operational metrics remain separate.</li>
+<li><input disabled type="checkbox"> Critical safety properties use deterministic checks.</li>
+<li><input disabled type="checkbox"> Model judges have calibrated rubrics and versioning.</li>
+<li><input disabled type="checkbox"> Traces contain sources, actions, policy decisions, and verification.</li>
+<li><input disabled type="checkbox"> Sensitive fields are excluded or irreversibly redacted.</li>
+<li><input disabled type="checkbox"> Tool behavior is realistic enough for the target test.</li>
+<li><input disabled type="checkbox"> Production failures can become minimized replay cases.</li>
+<li><input disabled type="checkbox"> Release gates compare against baseline by risk segment.</li>
+</ul>
+<h2 id="section-conclusion">Conclusion</h2>
+<p>Evaluation becomes an engineering system when traces, replay, diagnosis, and release gates are connected.</p>
+<p>The purpose is not to prove that a new model is smarter. It is to prove that the complete agent system is more likely to achieve the intended outcome, through an acceptable process, within operational constraints.</p>
+
+    </article>
+  </main>
+
+  <footer class="site-footer article-footer">
+    <a href="../">Dale Yang / Engineering notes</a>
+    <a href="https://github.com/yjd953/yjd953/blob/main/posts/trace-native-evaluation.md">View source ↗</a>
+  </footer>
+  <script src="../assets/site.js" defer></script>
+</body>
+</html>

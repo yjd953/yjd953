@@ -21,13 +21,21 @@
 
 **01 / Agent 系统**<br>
 [From Demo to Production: Four Reliability Pillars for Agents](https://yjd953.github.io/yjd953/notes/agent-reliability.html)<br>
-显式状态、契约优先的工具设计、分层评测与运行控制。
+显式状态、有界执行、结果核验、失败恢复与上线检查。
 
 **02 / 工具调用**<br>
 [A Practical Tool-Use Checklist](https://yjd953.github.io/yjd953/notes/tool-use-checklist.html)<br>
-一份面向工具契约、安全、执行和结果核验的精简上线清单。
+系统讲解工具契约、授权、幂等、错误语义、结果核验与隐私保护。
 
-**03 / 后端**<br>
+**03 / Agent 评测**<br>
+[Trace-Native Evaluation: From a Score to a Release Gate](https://yjd953.github.io/yjd953/notes/trace-native-evaluation.html)<br>
+把离线回放、轨迹诊断、线上反馈和风险发布门禁连接成评测闭环。
+
+**04 / 可观测性**<br>
+[Agent Observability: Metrics That Expose Failure](https://yjd953.github.io/yjd953/notes/agent-observability.html)<br>
+围绕真实完成率、执行轮次、Token 成本、延迟、工具和人工介入建设指标。
+
+**05 / 后端**<br>
 [后端开发八股文指南](https://yjd953.github.io/yjd953/notes/backend-interview-guide.html)<br>
 覆盖 Java、Go、JVM、Redis、MySQL、MQ、网络与分布式系统，共九个模块、90 个高频知识点。
 

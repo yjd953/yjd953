@@ -14,9 +14,9 @@ const notes = [
     pageTitle: "Agent Reliability — Dale Yang",
     category: "Agent systems",
     language: "EN",
-    detail: "4 principles",
+    detail: "7 sections",
     description:
-      "Explicit state, contract-first tools, layered evaluation, and operational control.",
+      "A production architecture for explicit state, bounded execution, verified effects, and recovery.",
   },
   {
     number: "02",
@@ -25,12 +25,36 @@ const notes = [
     title: "A Practical Tool-Use Checklist",
     category: "Tooling",
     language: "EN",
-    detail: "5 checks",
+    detail: "9 sections",
     description:
-      "A compact release checklist for tool contracts, safety, execution, and verification.",
+      "How to design tool contracts, authorization, idempotency, verification, and recovery.",
   },
   {
     number: "03",
+    slug: "trace-native-evaluation",
+    source: "posts/trace-native-evaluation.md",
+    title: "Trace-Native Evaluation: From a Score to a Release Gate",
+    pageTitle: "Trace-Native Evaluation — Dale Yang",
+    category: "Evaluation",
+    language: "EN",
+    detail: "9 sections",
+    description:
+      "Connect offline replay, trace diagnosis, production signals, and release gates.",
+  },
+  {
+    number: "04",
+    slug: "agent-observability",
+    source: "posts/agent-observability.md",
+    title: "Agent Observability: Metrics That Expose Failure",
+    pageTitle: "Agent Observability — Dale Yang",
+    category: "Observability",
+    language: "EN",
+    detail: "12 sections",
+    description:
+      "Measure verified outcomes, execution depth, token cost, latency, tools, and human control.",
+  },
+  {
+    number: "05",
     slug: "backend-interview-guide",
     source: "posts/backend-interview-guide.md",
     title: "后端开发八股文指南",
@@ -84,10 +108,13 @@ function renderMarkdown(markdown) {
       `<h${level} id="section-${headingId(content, counts)}">${content}</h${level}>`,
   );
 
-  return html.replace(
-    /<table>([\s\S]*?)<\/table>/g,
-    '<div class="table-scroll"><table>$1</table></div>',
-  );
+  return html
+    .replace(/\sdisabled=""/g, " disabled")
+    .replace(/\salign="(?:left|center|right)"/g, "")
+    .replace(
+      /<table>([\s\S]*?)<\/table>/g,
+      '<div class="table-scroll"><table>$1</table></div>',
+    );
 }
 
 function documentShell({

@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="description" content="Explicit state, contract-first tools, layered evaluation, and operational control.">
+  <meta name="description" content="A production architecture for explicit state, bounded execution, verified effects, and recovery.">
   <meta name="theme-color" content="#f1f1ee">
   <title>Agent Reliability — Dale Yang</title>
   <link rel="stylesheet" href="../assets/site.css">
@@ -24,23 +24,333 @@
       <a class="back-link" href="../">← All notes</a>
       <p class="kicker">01 / Agent systems / EN</p>
       <h1>From Demo to Production: Four Reliability Pillars for Agents</h1>
-      <p class="article-deck">Explicit state, contract-first tools, layered evaluation, and operational control.</p>
+      <p class="article-deck">A production architecture for explicit state, bounded execution, verified effects, and recovery.</p>
     </header>
 
     <article class="prose">
       <p>Agent demos optimize for possibility. Production systems optimize for repeatability under uncertainty.</p>
-<h2 id="section-1-explicit-state">1. Explicit state</h2>
-<p>Keep task state, user intent, tool results, and pending decisions structured. If the system cannot explain what it believes is true, recovery becomes guesswork.</p>
-<h2 id="section-2-contract-first-tools">2. Contract-first tools</h2>
-<p>Treat every tool as a typed boundary. Validate inputs, constrain side effects, make retries idempotent, and verify the resulting state instead of trusting a success string.</p>
-<h2 id="section-3-layered-evaluation">3. Layered evaluation</h2>
-<p>Combine deterministic checks, model-based evaluation, trace review, and online outcome metrics. A single benchmark cannot represent production behavior.</p>
-<h2 id="section-4-observability-and-control">4. Observability and control</h2>
-<p>Capture decisions, latency, token use, tool calls, errors, and human interventions. Keep high-impact actions reversible and put a human checkpoint where uncertainty meets consequence.</p>
-<h2 id="section-a-useful-mental-model">A useful mental model</h2>
-<pre><code class="language-text">context → reason → act → verify → learn
+<p>A convincing demo can be built with a model, a prompt, and a few tools. A dependable product needs more: explicit state, bounded execution, verified side effects, recovery paths, and enough evidence to explain what happened after the fact. Those capabilities form the <strong>agent harness</strong> around the model.</p>
+<p>The model proposes the next action. The harness decides whether that action is allowed, executes it under constraints, verifies the result, and records the transition.</p>
+<pre><code class="language-text">request
+  → assemble context
+  → propose action
+  → authorize
+  → execute
+  → verify state
+  → continue | complete | escalate
 </code></pre>
-<p>The model matters, but the loop around the model determines whether an agent is dependable.</p>
+<p>This article develops four reliability pillars and shows how they fit into one production control loop.</p>
+<h2 id="section-1-explicit-state-make-the-task-inspectable">1. Explicit state: make the task inspectable</h2>
+<p>Conversation history is not a task state. It is an unstructured transcript containing requests, guesses, tool output, corrections, and stale assumptions. If the system can only recover by replaying that transcript into another model call, recovery is probabilistic.</p>
+<p>A production agent should maintain a compact task record outside the prompt:</p>
+<pre><code class="language-json">{
+  &quot;task_id&quot;: &quot;task_8f2a&quot;,
+  &quot;goal&quot;: &quot;Schedule a design review with the API team&quot;,
+  &quot;status&quot;: &quot;awaiting_confirmation&quot;,
+  &quot;constraints&quot;: {
+    &quot;deadline&quot;: &quot;2026-10-03T18:00:00+08:00&quot;,
+    &quot;timezone&quot;: &quot;Asia/Shanghai&quot;,
+    &quot;max_attendees&quot;: 8
+  },
+  &quot;facts&quot;: [
+    {
+      &quot;value&quot;: &quot;Tuesday 15:00 is free for all required attendees&quot;,
+      &quot;source&quot;: &quot;calendar.freebusy&quot;,
+      &quot;observed_at&quot;: &quot;2026-09-30T10:18:22+08:00&quot;
+    }
+  ],
+  &quot;pending_action&quot;: {
+    &quot;tool&quot;: &quot;calendar.create_event&quot;,
+    &quot;risk&quot;: &quot;reversible_write&quot;,
+    &quot;requires_confirmation&quot;: true
+  },
+  &quot;last_verified_step&quot;: &quot;availability_checked&quot;
+}
+</code></pre>
+<p>The important distinction is between four kinds of information:</p>
+<div class="table-scroll"><table>
+<thead>
+<tr>
+<th>Kind</th>
+<th>Meaning</th>
+<th>Example</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Goal</td>
+<td>What the user wants achieved</td>
+<td>A review meeting exists</td>
+</tr>
+<tr>
+<td>Constraint</td>
+<td>A boundary that must remain true</td>
+<td>Before Friday, required attendees only</td>
+</tr>
+<tr>
+<td>Fact</td>
+<td>A claim backed by a source</td>
+<td>Calendar free/busy result</td>
+</tr>
+<tr>
+<td>Proposal</td>
+<td>An action that has not happened yet</td>
+<td>Create Tuesday 15:00 event</td>
+</tr>
+</tbody></table></div>
+<p>Mixing facts and proposals is a common source of false completion. A model may mention an action in natural language and later treat that mention as evidence that the action occurred. Typed state prevents that category error.</p>
+<h3 id="section-state-must-survive-interruption">State must survive interruption</h3>
+<p>Every externally meaningful step should end with a checkpoint. A checkpoint contains the normalized input, the action attempt, the observed result, and the next legal states. If a worker crashes, another worker can resume from the last <strong>verified</strong> checkpoint instead of repeating the entire task.</p>
+<p>Useful invariants include:</p>
+<ul>
+<li>A completed state always references verification evidence.</li>
+<li>A pending side effect is never represented as completed.</li>
+<li>An irreversible action cannot be retried without an idempotency or reconciliation strategy.</li>
+<li>Expired observations are re-read before they influence a new action.</li>
+</ul>
+<h2 id="section-2-contract-first-tools-treat-every-call-as-a-transaction">2. Contract-first tools: treat every call as a transaction</h2>
+<p>Tool use is where an agent stops generating text and starts changing external state. That boundary needs a stronger contract than a function name plus JSON Schema.</p>
+<p>A production tool contract should define:</p>
+<ol>
+<li><strong>Structural rules</strong>: types, required fields, formats, enums, and size limits.</li>
+<li><strong>Semantic rules</strong>: relationships between fields, such as <code>end_at &gt; start_at</code>.</li>
+<li><strong>Authorization rules</strong>: which identity may perform which operation on which resource.</li>
+<li><strong>Effect semantics</strong>: what can be created, changed, deleted, sent, or published.</li>
+<li><strong>Failure semantics</strong>: retryable, rejected, conflicted, timed out, or partially completed.</li>
+<li><strong>Verification rules</strong>: where the authoritative post-action state can be read.</li>
+<li><strong>Recovery rules</strong>: retry, compensate, reconcile, or escalate.</li>
+</ol>
+<p>For example:</p>
+<pre><code class="language-json">{
+  &quot;name&quot;: &quot;create_calendar_event&quot;,
+  &quot;risk&quot;: &quot;reversible_write&quot;,
+  &quot;idempotency&quot;: {
+    &quot;required&quot;: true,
+    &quot;scope&quot;: &quot;organizer + attendees + start_at&quot;
+  },
+  &quot;timeout_ms&quot;: 8000,
+  &quot;verification&quot;: {
+    &quot;read&quot;: &quot;calendar.get_event(result.event_id)&quot;,
+    &quot;invariants&quot;: [
+      &quot;status == confirmed&quot;,
+      &quot;start_at == request.start_at&quot;,
+      &quot;required_attendees subset_of attendees&quot;
+    ]
+  }
+}
+</code></pre>
+<h3 id="section-success-is-an-observed-state-not-a-return-string">Success is an observed state, not a return string</h3>
+<p>An HTTP 200 may mean &quot;accepted for processing.&quot; A tool response saying <code>success: true</code> may still precede asynchronous validation, eventual consistency, or a downstream failure. The harness should read the authoritative object and compare explicit invariants.</p>
+<pre><code class="language-text">prepare → authorize → execute → read authoritative state → compare invariants
+</code></pre>
+<p>This is the difference between <strong>request success</strong> and <strong>task success</strong>.</p>
+<h2 id="section-3-bounded-execution-replace-open-loops-with-a-state-machine">3. Bounded execution: replace open loops with a state machine</h2>
+<p>The most dangerous implementation of an agent is an unconstrained loop:</p>
+<pre><code class="language-python">while True:
+    next_action = model(context)
+    if next_action.type == &quot;finish&quot;:
+        break
+    execute(next_action)
+</code></pre>
+<p>The model controls termination, cost, and side effects. A malformed tool result or a weak prompt can create repeated calls, growing context, and duplicated writes.</p>
+<p>A safer runtime uses explicit states and global guards:</p>
+<pre><code class="language-text">RECEIVED
+  → CONTEXT_READY
+  → DECIDING
+  → ACTION_PENDING
+  → EXECUTING
+  → VERIFYING
+  → DECIDING | COMPLETED | BLOCKED
+
+Global guards:
+- max_steps
+- deadline
+- token_budget
+- tool_budget
+- repeated_action_limit
+- side_effect_budget
+- human_checkpoint
+</code></pre>
+<p>Each transition should answer:</p>
+<ul>
+<li>What condition allows entry?</li>
+<li>Which inputs are trusted?</li>
+<li>Which outputs are produced?</li>
+<li>What evidence is recorded?</li>
+<li>Which failures are retryable?</li>
+<li>What is the next legal state?</li>
+</ul>
+<p>The model can still choose among allowed actions, but it no longer controls the boundaries of the system.</p>
+<h3 id="section-detecting-unproductive-loops">Detecting unproductive loops</h3>
+<p>A step limit alone stops a runaway task but does not explain it. Record a normalized action fingerprint:</p>
+<pre><code class="language-text">fingerprint = tool_name + canonical_arguments + relevant_state_version
+</code></pre>
+<p>Repeated fingerprints without new evidence indicate a loop. Repeated reasoning with no change in the task state indicates stagnation. Both should trigger a different strategy or a human checkpoint before the hard step limit is reached.</p>
+<h2 id="section-4-recovery-first-execution">4. Recovery-first execution</h2>
+<p>Failures are normal when an agent coordinates APIs, browsers, databases, and human approval. Recovery must be designed before retries are enabled.</p>
+<h3 id="section-retry-only-transient-failures">Retry only transient failures</h3>
+<p>Rate limits, temporary network failures, and service unavailability may be retried with bounded exponential backoff. Invalid arguments, permission errors, policy rejections, and business conflicts should not be retried unchanged.</p>
+<p>Every error should be mapped to a typed category:</p>
+<pre><code class="language-text">TRANSIENT
+INVALID_INPUT
+UNAUTHORIZED
+CONFLICT
+PARTIAL_SUCCESS
+UNKNOWN_OUTCOME
+POLICY_BLOCKED
+</code></pre>
+<p><code>UNKNOWN_OUTCOME</code> deserves special treatment. A timeout does not prove that the downstream action failed. Before retrying, the harness must query the authoritative state using an idempotency key or business identifier.</p>
+<h3 id="section-resume-from-verified-checkpoints">Resume from verified checkpoints</h3>
+<p>Recovery should continue from the last known-good state:</p>
+<pre><code class="language-text">attempt action
+  → timeout
+  → query by idempotency key
+  → object exists and invariants match
+  → mark verified
+  → continue
+</code></pre>
+<p>Restarting the whole task can duplicate emails, orders, approvals, or calendar events. Checkpoint recovery turns failure handling into a deterministic workflow instead of another prompt.</p>
+<h3 id="section-escalate-ambiguity-not-every-error">Escalate ambiguity, not every error</h3>
+<p>Human intervention is valuable when uncertainty meets consequence:</p>
+<ul>
+<li>the target object is ambiguous;</li>
+<li>required authorization is missing;</li>
+<li>a CAPTCHA or physical confirmation is required;</li>
+<li>an irreversible action is ready to commit;</li>
+<li>the external result cannot be reconciled safely.</li>
+</ul>
+<p>The handoff should include the goal, current state, evidence, attempted actions, and the exact decision required. &quot;Something failed, please help&quot; is not a usable checkpoint.</p>
+<h2 id="section-5-layered-evaluation-measure-outcome-process-and-operations">5. Layered evaluation: measure outcome, process, and operations</h2>
+<p>A final-answer score is insufficient for agents. Two runs may produce the same answer while one uses valid evidence and the other guesses. Two runs may call the same tool while one has correct parameters and the other accidentally succeeds.</p>
+<p>Evaluate three dimensions:</p>
+<pre><code class="language-text">Task quality
+  = outcome quality
+  × process integrity
+  × operational reliability
+</code></pre>
+<div class="table-scroll"><table>
+<thead>
+<tr>
+<th>Dimension</th>
+<th>Questions</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Outcome</td>
+<td>Was the user&#39;s goal actually achieved?</td>
+</tr>
+<tr>
+<td>Process</td>
+<td>Were context, tool choice, arguments, permissions, and evidence correct?</td>
+</tr>
+<tr>
+<td>Operations</td>
+<td>Were latency, cost, retries, and recovery within budget?</td>
+</tr>
+</tbody></table></div>
+<p>A useful evaluation stack combines:</p>
+<ol>
+<li>deterministic checks for schemas, permissions, citations, and state invariants;</li>
+<li>model-based judges for semantic quality;</li>
+<li>trace review for tool choice and recovery behavior;</li>
+<li>online outcomes such as correction rate, abandonment, and human takeover.</li>
+</ol>
+<p>No single layer replaces the others.</p>
+<h2 id="section-6-observability-and-control">6. Observability and control</h2>
+<p>Logs centered on model requests are too narrow. The unit of observability should be the task and its state transitions.</p>
+<p>A minimum trace should include:</p>
+<ul>
+<li>task ID, user goal, channel, and policy scope;</li>
+<li>model, prompt, tool, and policy versions;</li>
+<li>context sources, timestamps, and token allocation;</li>
+<li>every proposed and selected action;</li>
+<li>authorization decisions and human checkpoints;</li>
+<li>tool latency, result category, retry count, and response summary;</li>
+<li>verification evidence and final business state;</li>
+<li>total tokens, cost, wall time, and execution steps.</li>
+</ul>
+<p>Sensitive values should be excluded by schema, not removed later with best-effort string replacement. Use field allowlists, hashed identifiers, summaries, and controlled sampling.</p>
+<p>Budgets are also control mechanisms:</p>
+<div class="table-scroll"><table>
+<thead>
+<tr>
+<th>Budget</th>
+<th>Prevents</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Step budget</td>
+<td>Infinite decision loops</td>
+</tr>
+<tr>
+<td>Token budget</td>
+<td>Unbounded context growth</td>
+</tr>
+<tr>
+<td>Tool budget</td>
+<td>Repeated or fan-out calls</td>
+</tr>
+<tr>
+<td>Time budget</td>
+<td>Tasks that never converge</td>
+</tr>
+<tr>
+<td>Side-effect budget</td>
+<td>Excessive external changes</td>
+</tr>
+</tbody></table></div>
+<p>When a budget is reached, the system should produce a structured <code>BLOCKED</code> result with the reason and evidence rather than pretending to finish.</p>
+<h2 id="section-7-a-production-architecture">7. A production architecture</h2>
+<p>The four pillars map naturally to six runtime layers:</p>
+<div class="table-scroll"><table>
+<thead>
+<tr>
+<th>Layer</th>
+<th>Responsibility</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Ingress</td>
+<td>Normalize request, identity, attachments, and channel</td>
+</tr>
+<tr>
+<td>Context engine</td>
+<td>Retrieve, rank, compact, cite, and budget</td>
+</tr>
+<tr>
+<td>Decision loop</td>
+<td>Produce bounded action candidates</td>
+</tr>
+<tr>
+<td>Execution plane</td>
+<td>Validate, authorize, invoke, and verify</td>
+</tr>
+<tr>
+<td>State store</td>
+<td>Persist checkpoints, facts, and pending actions</td>
+</tr>
+<tr>
+<td>Observability and eval</td>
+<td>Trace, replay, diagnose, and gate releases</td>
+</tr>
+</tbody></table></div>
+<p>The model is replaceable inside this architecture. State contracts and verification boundaries should remain stable when the model changes.</p>
+<h2 id="section-release-checklist">Release checklist</h2>
+<ul>
+<li><input disabled type="checkbox"> Task state is structured and serializable.</li>
+<li><input disabled type="checkbox"> Facts include source and observation time.</li>
+<li><input disabled type="checkbox"> Every loop has step, time, token, and tool limits.</li>
+<li><input disabled type="checkbox"> Side-effecting tools declare risk and authorization requirements.</li>
+<li><input disabled type="checkbox"> Writes support idempotency or safe reconciliation.</li>
+<li><input disabled type="checkbox"> Completion requires authoritative post-action verification.</li>
+<li><input disabled type="checkbox"> Recovery resumes from a verified checkpoint.</li>
+<li><input disabled type="checkbox"> Repeated actions and stagnant state are detected.</li>
+<li><input disabled type="checkbox"> High-impact actions have an explicit human checkpoint.</li>
+<li><input disabled type="checkbox"> Traces can answer why each action happened.</li>
+<li><input disabled type="checkbox"> Production failures can be converted into replayable regression cases.</li>
+</ul>
+<h2 id="section-conclusion">Conclusion</h2>
+<p>Reliable agents are not created by asking the model to be more careful. They are created by placing an uncertain decision component inside a system with explicit state, strict tool contracts, bounded execution, verified effects, and recoverable transitions.</p>
+<p>The model determines what is possible. The harness determines what is dependable.</p>
 
     </article>
   </main>

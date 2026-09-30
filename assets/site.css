@@ -357,6 +357,17 @@ a {
   margin-top: 8px;
 }
 
+.prose input[type="checkbox"] {
+  width: 15px;
+  height: 15px;
+  margin: 0 9px 0 -22px;
+  accent-color: var(--accent);
+}
+
+.prose .task-list-item {
+  list-style: none;
+}
+
 .prose a {
   color: var(--text);
   text-decoration-color: var(--accent);

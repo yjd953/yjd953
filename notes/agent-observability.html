@@ -1,0 +1,491 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Measure verified outcomes, execution depth, token cost, latency, tools, and human control.">
+  <meta name="theme-color" content="#f1f1ee">
+  <title>Agent Observability — Dale Yang</title>
+  <link rel="stylesheet" href="../assets/site.css">
+</head>
+<body class="article-page">
+  <div class="reading-progress" id="readingProgress" aria-hidden="true"></div>
+
+  <header class="site-header">
+    <a class="wordmark" href="../" aria-label="Back to writing index">DY<span>.</span></a>
+    <nav aria-label="Primary">
+      <a href="../">All notes</a>
+      <a href="https://github.com/yjd953">GitHub</a>
+    </nav>
+  </header>
+
+  <main class="article-layout">
+    <header class="article-masthead">
+      <a class="back-link" href="../">← All notes</a>
+      <p class="kicker">04 / Observability / EN</p>
+      <h1>Agent Observability: Metrics That Expose Failure</h1>
+      <p class="article-deck">Measure verified outcomes, execution depth, token cost, latency, tools, and human control.</p>
+    </header>
+
+    <article class="prose">
+      <p>Traditional service monitoring asks whether a request succeeded, how long it took, and which dependency failed. Agent systems add another layer: the request may return 200 while the task fails, the model may call healthy tools in the wrong order, and cost may grow because the execution loop does not converge.</p>
+<p>Observability therefore has to follow the task, not only the HTTP request.</p>
+<pre><code class="language-text">service telemetry
+  + model telemetry
+  + tool telemetry
+  + task state
+  + verified outcome
+  = agent observability
+</code></pre>
+<p>This article defines a practical measurement model for task completion, execution depth, token use, cost, latency, tools, and human intervention.</p>
+<h2 id="section-1-choose-the-correct-unit-of-observation">1. Choose the correct unit of observation</h2>
+<p>An agent task often spans multiple model calls, tools, retries, workers, and human checkpoints. Request-level dashboards fragment that work into unrelated events.</p>
+<p>Use four nested identifiers:</p>
+<div class="table-scroll"><table>
+<thead>
+<tr>
+<th>Level</th>
+<th>Identifier</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Task</td>
+<td><code>task_id</code></td>
+<td>One user goal from accepted input to final outcome</td>
+</tr>
+<tr>
+<td>Run</td>
+<td><code>run_id</code></td>
+<td>One execution attempt, including resumes</td>
+</tr>
+<tr>
+<td>Step</td>
+<td><code>step_id</code></td>
+<td>One state transition or model decision</td>
+</tr>
+<tr>
+<td>Operation</td>
+<td><code>operation_id</code></td>
+<td>One model, retrieval, policy, or tool call</td>
+</tr>
+</tbody></table></div>
+<p>The task is the product unit. The operation is the debugging unit.</p>
+<pre><code class="language-json">{
+  &quot;task_id&quot;: &quot;task_8f2a&quot;,
+  &quot;run_id&quot;: &quot;run_03&quot;,
+  &quot;step_id&quot;: &quot;step_07&quot;,
+  &quot;operation_id&quot;: &quot;tool_11&quot;,
+  &quot;task_type&quot;: &quot;calendar_scheduling&quot;,
+  &quot;state&quot;: &quot;verifying&quot;
+}
+</code></pre>
+<p>Stable IDs allow traces, logs, metrics, and external audit records to be joined without copying full payloads into every system.</p>
+<h2 id="section-2-define-completion-as-a-verified-business-state">2. Define completion as a verified business state</h2>
+<p>The easiest metric to publish is response success rate. It is also one of the least useful.</p>
+<pre><code class="language-text">HTTP success ≠ model success ≠ tool success ≠ task success
+</code></pre>
+<p>Use a task outcome taxonomy:</p>
+<pre><code class="language-text">COMPLETED_VERIFIED
+COMPLETED_UNVERIFIED
+PARTIAL
+BLOCKED_USER_INPUT
+BLOCKED_PERMISSION
+FAILED_RETRYABLE
+FAILED_TERMINAL
+ABANDONED
+</code></pre>
+<p>The primary success metric should be:</p>
+<pre><code class="language-text">verified completion rate
+  = COMPLETED_VERIFIED tasks / eligible tasks
+</code></pre>
+<p>Keep the denominator explicit. Exclude unsupported requests only when they are classified before execution. Silently removing hard or failed tasks creates a misleading success rate.</p>
+<h3 id="section-track-correction-and-reversal">Track correction and reversal</h3>
+<p>A task that looks successful may be corrected later. Useful delayed signals include:</p>
+<ul>
+<li>user edits immediately after agent completion;</li>
+<li>downstream rollback;</li>
+<li>reopened tickets;</li>
+<li>canceled events;</li>
+<li>repeated request for the same goal;</li>
+<li>negative feedback tied to a task ID.</li>
+</ul>
+<p>Measure both immediate completion and completion that remains accepted after a time window.</p>
+<h2 id="section-3-measure-execution-depth">3. Measure execution depth</h2>
+<p>Agent latency and cost are heavily influenced by how many decisions the system makes before completion.</p>
+<p>Core metrics:</p>
+<ul>
+<li>steps per task;</li>
+<li>model calls per task;</li>
+<li>tool calls per task;</li>
+<li>retries per operation;</li>
+<li>repeated action fingerprints;</li>
+<li>state transitions without new evidence;</li>
+<li>maximum and P95 execution depth.</li>
+</ul>
+<p>Averages hide the long tail. A system with a median of three steps and a P99 of eighty steps has a convergence problem.</p>
+<h3 id="section-detect-loops-and-stagnation">Detect loops and stagnation</h3>
+<p>Define an action fingerprint:</p>
+<pre><code class="language-text">tool + normalized arguments + relevant state version
+</code></pre>
+<p>Then track:</p>
+<pre><code class="language-text">repeated_action_rate
+stagnant_step_rate
+tasks_hitting_step_limit
+tasks_hitting_tool_limit
+</code></pre>
+<p>A repeated action may be legitimate after new evidence. Repetition with unchanged state is the stronger failure signal.</p>
+<h3 id="section-segment-depth-by-outcome">Segment depth by outcome</h3>
+<p>Compare step distributions for:</p>
+<ul>
+<li>verified success;</li>
+<li>user takeover;</li>
+<li>terminal failure;</li>
+<li>high-cost outliers;</li>
+<li>each task type and tool.</li>
+</ul>
+<p>If failed tasks consume far more steps than successful tasks, introduce earlier stop conditions or route ambiguous cases to clarification.</p>
+<h2 id="section-4-attribute-token-use-and-cost">4. Attribute token use and cost</h2>
+<p>Total token count is not enough. Attribute tokens to their purpose.</p>
+<pre><code class="language-text">input tokens
+  = system instructions
+  + conversation
+  + retrieved context
+  + tool results
+  + task state
+
+output tokens
+  = reasoning-facing output
+  + tool arguments
+  + final response
+</code></pre>
+<p>Capture:</p>
+<ul>
+<li>input and output tokens per model call;</li>
+<li>cumulative tokens per task;</li>
+<li>tokens by context source;</li>
+<li>tokens added by tool results;</li>
+<li>cached versus uncached tokens;</li>
+<li>model-specific price at execution time;</li>
+<li>cost per verified task.</li>
+</ul>
+<p>The key business metric is not cost per request:</p>
+<pre><code class="language-text">cost per verified completion
+  = total eligible task cost / verified completed tasks
+</code></pre>
+<p>Cheaper requests do not improve efficiency if they require more retries or reduce completion.</p>
+<h3 id="section-context-efficiency">Context efficiency</h3>
+<p>Useful context metrics include:</p>
+<div class="table-scroll"><table>
+<thead>
+<tr>
+<th>Metric</th>
+<th>Interpretation</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Retrieved tokens per task</td>
+<td>Context volume</td>
+</tr>
+<tr>
+<td>Cited-source utilization</td>
+<td>Evidence actually used</td>
+</tr>
+<tr>
+<td>Irrelevant-context rate</td>
+<td>Retrieval waste</td>
+</tr>
+<tr>
+<td>Repeated-context ratio</td>
+<td>Duplication across steps</td>
+</tr>
+<tr>
+<td>Context growth slope</td>
+<td>Whether the loop accumulates history</td>
+</tr>
+<tr>
+<td>Compaction frequency</td>
+<td>Pressure on the context window</td>
+</tr>
+</tbody></table></div>
+<p>A rapidly growing context with flat task progress is a warning sign. Compaction can reduce tokens but may hide the underlying loop, so correlate it with state transitions.</p>
+<h2 id="section-5-decompose-latency">5. Decompose latency</h2>
+<p>End-to-end latency should be decomposed into stages:</p>
+<pre><code class="language-text">task latency
+  = queue
+  + context assembly
+  + model inference
+  + policy
+  + tool execution
+  + verification
+  + human wait
+</code></pre>
+<p>Record active system time separately from time waiting for a person.</p>
+<div class="table-scroll"><table>
+<thead>
+<tr>
+<th>Metric</th>
+<th>Why it matters</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Time to first useful action</td>
+<td>Perceived responsiveness</td>
+</tr>
+<tr>
+<td>Time to verified completion</td>
+<td>Actual task duration</td>
+</tr>
+<tr>
+<td>Model P50/P95/P99</td>
+<td>Inference tail</td>
+</tr>
+<tr>
+<td>Tool P50/P95/P99</td>
+<td>Dependency tail</td>
+</tr>
+<tr>
+<td>Queue delay</td>
+<td>Capacity pressure</td>
+</tr>
+<tr>
+<td>Verification delay</td>
+<td>Eventual consistency or polling</td>
+</tr>
+<tr>
+<td>Human wait time</td>
+<td>Workflow rather than system latency</td>
+</tr>
+</tbody></table></div>
+<p>Parallel calls can reduce wall time while increasing cost and blast radius. Track fan-out width and canceled operations so latency optimization does not become uncontrolled concurrency.</p>
+<h2 id="section-6-observe-tools-as-transactions">6. Observe tools as transactions</h2>
+<p>For each tool and version, measure:</p>
+<ul>
+<li>selection count;</li>
+<li>valid-argument rate;</li>
+<li>authorization allow, deny, and confirmation rates;</li>
+<li>execution success by typed error;</li>
+<li>retries and retry recovery;</li>
+<li>idempotency conflicts;</li>
+<li>unknown outcomes;</li>
+<li>verification pass rate;</li>
+<li>side effects per task;</li>
+<li>latency and response size.</li>
+</ul>
+<p>Separate three failure points:</p>
+<pre><code class="language-text">selection failed
+argument construction failed
+execution failed
+</code></pre>
+<p>Combining them into &quot;tool error&quot; prevents ownership. A model or prompt change affects selection and arguments; an adapter release affects execution and verification; a policy change affects authorization.</p>
+<h3 id="section-track-version-dimensions">Track version dimensions</h3>
+<p>Every event should include:</p>
+<ul>
+<li>model version;</li>
+<li>prompt version;</li>
+<li>tool schema and adapter version;</li>
+<li>policy version;</li>
+<li>retrieval index or corpus version;</li>
+<li>experiment assignment.</li>
+</ul>
+<p>Without these dimensions, a dashboard can show a regression but cannot identify the change responsible.</p>
+<h2 id="section-7-measure-human-control">7. Measure human control</h2>
+<p>Human intervention is not automatically a failure. It may be the correct behavior for a high-risk or ambiguous task.</p>
+<p>Classify checkpoints:</p>
+<pre><code class="language-text">CLARIFICATION
+AUTHORIZATION
+HIGH_RISK_CONFIRMATION
+CAPTCHA_OR_LOGIN
+AMBIGUOUS_STATE
+OPERATOR_RECOVERY
+</code></pre>
+<p>Track:</p>
+<ul>
+<li>checkpoint rate by task type and risk class;</li>
+<li>acceptance, edit, and rejection rate;</li>
+<li>time to response;</li>
+<li>percentage of handoffs with complete context;</li>
+<li>task success after intervention;</li>
+<li>unnecessary-confirmation rate.</li>
+</ul>
+<p>The goal is not zero human involvement. The goal is to place humans where judgment changes the outcome while automating routine, well-bounded work.</p>
+<h2 id="section-8-design-a-useful-event-schema">8. Design a useful event schema</h2>
+<p>Metrics should be derivable from structured events rather than parsed log sentences.</p>
+<pre><code class="language-json">{
+  &quot;event&quot;: &quot;agent.step.completed&quot;,
+  &quot;timestamp&quot;: &quot;2026-09-30T10:18:22.481Z&quot;,
+  &quot;task_id&quot;: &quot;task_8f2a&quot;,
+  &quot;run_id&quot;: &quot;run_03&quot;,
+  &quot;step_id&quot;: &quot;step_07&quot;,
+  &quot;task_type&quot;: &quot;calendar_scheduling&quot;,
+  &quot;from_state&quot;: &quot;executing&quot;,
+  &quot;to_state&quot;: &quot;verifying&quot;,
+  &quot;model&quot;: {
+    &quot;name&quot;: &quot;model-2026-09&quot;,
+    &quot;prompt_version&quot;: &quot;scheduler-v14&quot;,
+    &quot;input_tokens&quot;: 2180,
+    &quot;output_tokens&quot;: 164
+  },
+  &quot;tool&quot;: {
+    &quot;name&quot;: &quot;calendar.create_event&quot;,
+    &quot;version&quot;: &quot;3&quot;,
+    &quot;attempt&quot;: 1,
+    &quot;duration_ms&quot;: 184,
+    &quot;result_type&quot;: &quot;success&quot;
+  },
+  &quot;budget&quot;: {
+    &quot;step&quot;: 7,
+    &quot;max_steps&quot;: 12,
+    &quot;cost_usd&quot;: 0.018
+  },
+  &quot;verification&quot;: {
+    &quot;status&quot;: &quot;pending&quot;
+  }
+}
+</code></pre>
+<h3 id="section-control-cardinality">Control cardinality</h3>
+<p>Do not place task IDs, user IDs, full URLs, prompts, or arbitrary error strings in metric labels. They create unbounded cardinality and cost.</p>
+<p>Use:</p>
+<ul>
+<li>low-cardinality dimensions in metrics;</li>
+<li>task IDs in traces;</li>
+<li>structured details in logs;</li>
+<li>sampled payloads in restricted storage.</li>
+</ul>
+<h3 id="section-protect-content">Protect content</h3>
+<p>Observability is not permission to store everything.</p>
+<ul>
+<li>redact before telemetry leaves the process;</li>
+<li>hash identifiers used for correlation;</li>
+<li>store prompt and tool payloads only when necessary;</li>
+<li>separate debugging access from aggregate dashboard access;</li>
+<li>set retention by sensitivity;</li>
+<li>audit access to raw traces.</li>
+</ul>
+<h2 id="section-9-build-dashboards-around-decisions">9. Build dashboards around decisions</h2>
+<p>A useful dashboard answers a sequence of questions.</p>
+<h3 id="section-overview">Overview</h3>
+<ul>
+<li>Is verified completion changing?</li>
+<li>Are latency and cost within budget?</li>
+<li>Is human takeover increasing?</li>
+<li>Which task types explain the movement?</li>
+</ul>
+<h3 id="section-execution">Execution</h3>
+<ul>
+<li>Are tasks taking more steps?</li>
+<li>Which tools have rising retries or verification failures?</li>
+<li>Are repeated actions or unknown outcomes increasing?</li>
+<li>Did a model, prompt, tool, or policy version change?</li>
+</ul>
+<h3 id="section-cost">Cost</h3>
+<ul>
+<li>Which task types consume the most tokens?</li>
+<li>Is input growth caused by retrieval, tool output, or conversation history?</li>
+<li>What is cost per verified completion?</li>
+<li>Are expensive tasks actually more successful?</li>
+</ul>
+<h3 id="section-failure-analysis">Failure analysis</h3>
+<ul>
+<li>What are the top typed failure classes?</li>
+<li>Which new failure clusters appeared?</li>
+<li>Can representative traces be replayed?</li>
+<li>Does the regression affect a critical risk segment?</li>
+</ul>
+<p>Avoid one dashboard with dozens of unrelated charts. Use an overview for detection and linked diagnostic views for explanation.</p>
+<h2 id="section-10-alert-on-symptoms-with-user-impact">10. Alert on symptoms with user impact</h2>
+<p>Alerts should identify a meaningful deviation and point to a diagnostic slice.</p>
+<p>Strong alerts:</p>
+<ul>
+<li>verified completion drops for a critical task type;</li>
+<li>duplicate side effects exceed zero;</li>
+<li>verification coverage falls below the release invariant;</li>
+<li>unknown outcomes rise after a tool release;</li>
+<li>P95 steps or cost per success crosses a budget;</li>
+<li>policy denials unexpectedly spike for one tenant or tool.</li>
+</ul>
+<p>Weak alerts:</p>
+<ul>
+<li>raw token volume increased;</li>
+<li>one model request was slow;</li>
+<li>tool calls increased without task context;</li>
+<li>average latency moved slightly while the distribution remained healthy.</li>
+</ul>
+<p>Use burn-rate or sustained-window alerts to avoid reacting to small random changes. For safety invariants such as duplicate irreversible actions, alert immediately.</p>
+<h2 id="section-11-diagnose-one-regression-end-to-end">11. Diagnose one regression end to end</h2>
+<p>Suppose cost per verified task rises 38 percent after a release.</p>
+<p>Start with the decomposition:</p>
+<pre><code class="language-text">cost per verified task
+  = cost per attempt
+  × attempts per task
+  / verified completion rate
+</code></pre>
+<p>Then inspect:</p>
+<ol>
+<li>Input tokens increased, output tokens stayed flat.</li>
+<li>The increase is isolated to <code>research_summary</code>.</li>
+<li>Retrieved tokens per step are stable, but repeated-context ratio doubled.</li>
+<li>Step count P95 increased from 8 to 15.</li>
+<li>Traces show the same search result appended after every retry.</li>
+<li>The retry path rebuilds context without deduplicating evidence.</li>
+</ol>
+<p>The dashboard did not merely show &quot;token cost is high.&quot; The joined task, step, and context metrics identified a specific state-management defect.</p>
+<h2 id="section-12-a-practical-rollout">12. A practical rollout</h2>
+<h3 id="section-phase-1-establish-identifiers-and-outcomes">Phase 1: establish identifiers and outcomes</h3>
+<ul>
+<li>propagate task, run, step, and operation IDs;</li>
+<li>define the task outcome taxonomy;</li>
+<li>require verification evidence for completed writes;</li>
+<li>record model, prompt, tool, and policy versions.</li>
+</ul>
+<h3 id="section-phase-2-add-budgets-and-component-metrics">Phase 2: add budgets and component metrics</h3>
+<ul>
+<li>token, step, tool, time, and side-effect budgets;</li>
+<li>latency decomposition;</li>
+<li>typed tool errors;</li>
+<li>cost per verified completion.</li>
+</ul>
+<h3 id="section-phase-3-connect-traces-to-evaluation">Phase 3: connect traces to evaluation</h3>
+<ul>
+<li>sample corrections, takeovers, and outliers;</li>
+<li>classify failure modes;</li>
+<li>create replayable regression cases;</li>
+<li>link release versions to metric movement.</li>
+</ul>
+<h3 id="section-phase-4-add-targeted-alerts">Phase 4: add targeted alerts</h3>
+<ul>
+<li>critical task completion;</li>
+<li>duplicate effects;</li>
+<li>verification coverage;</li>
+<li>high-cost execution tails;</li>
+<li>new failure clusters.</li>
+</ul>
+<h2 id="section-instrumentation-checklist">Instrumentation checklist</h2>
+<ul>
+<li><input disabled type="checkbox"> Task, run, step, and operation IDs are stable.</li>
+<li><input disabled type="checkbox"> Completion means a verified business state.</li>
+<li><input disabled type="checkbox"> Outcomes distinguish blocked, partial, failed, and abandoned tasks.</li>
+<li><input disabled type="checkbox"> Step count and repeated-action fingerprints are recorded.</li>
+<li><input disabled type="checkbox"> Tokens are attributed to context, tools, and outputs.</li>
+<li><input disabled type="checkbox"> Cost per verified completion is available.</li>
+<li><input disabled type="checkbox"> Latency is split by queue, model, tool, verification, and human wait.</li>
+<li><input disabled type="checkbox"> Tool selection, arguments, execution, and verification are separate metrics.</li>
+<li><input disabled type="checkbox"> Model, prompt, tool, policy, and experiment versions are dimensions.</li>
+<li><input disabled type="checkbox"> Sensitive content is excluded before telemetry emission.</li>
+<li><input disabled type="checkbox"> Dashboards link aggregate changes to representative traces.</li>
+<li><input disabled type="checkbox"> Production failures can become regression cases.</li>
+</ul>
+<h2 id="section-conclusion">Conclusion</h2>
+<p>Agent observability is not a larger version of an API dashboard. It is a measurement system for goal completion, decision quality, external effects, resource use, and control.</p>
+<p>When telemetry follows the task from intent to verified outcome, teams can answer the questions that matter: Did the agent finish the work? Was the path safe? Why did cost change? Where did execution diverge? Can the failure be reproduced?</p>
+
+    </article>
+  </main>
+
+  <footer class="site-footer article-footer">
+    <a href="../">Dale Yang / Engineering notes</a>
+    <a href="https://github.com/yjd953/yjd953/blob/main/posts/agent-observability.md">View source ↗</a>
+  </footer>
+  <script src="../assets/site.js" defer></script>
+</body>
+</html>
