@@ -1,0 +1,461 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="How to design tool contracts, authorization, idempotency, verification, and recovery.">
+  <meta name="theme-color" content="#f1f1ee">
+  <title>A Practical Tool-Use Checklist — Dale Yang</title>
+  <link rel="stylesheet" href="../assets/site.css">
+</head>
+<body class="article-page">
+  <div class="reading-progress" id="readingProgress" aria-hidden="true"></div>
+
+  <header class="site-header">
+    <a class="wordmark" href="../" aria-label="Dale Yang home">DY<span>.</span></a>
+    <nav aria-label="Primary">
+      <a href="../sections/agent.html">Agent 探索</a>
+      <a href="https://github.com/yjd953">GitHub</a>
+    </nav>
+  </header>
+
+  <main class="article-layout">
+    <header class="article-masthead">
+      <a class="back-link" href="../sections/agent.html">← Agent 探索</a>
+      <p class="kicker">01.16 / Tooling / EN</p>
+      <h1>A Practical Tool-Use Checklist</h1>
+      <p class="article-deck">How to design tool contracts, authorization, idempotency, verification, and recovery.</p>
+    </header>
+
+    <article class="prose">
+      <p>Tools are the boundary where an agent stops proposing text and starts changing the world. That boundary deserves the same engineering discipline as a payment API, deployment system, or database migration.</p>
+<p>A function name and a JSON Schema are not enough. A production tool must define what the operation means, who may run it, which effects it can create, how failures are classified, and how the final state is verified.</p>
+<p>This guide treats every tool call as a small transaction:</p>
+<pre><code class="language-text">intent
+  → validate
+  → authorize
+  → prepare
+  → execute
+  → verify
+  → commit trace
+</code></pre>
+<p>If any stage is missing, the agent may still work in a demo. The missing stage will eventually become an incident in production.</p>
+<h2 id="section-1-start-with-the-effect-not-the-function-signature">1. Start with the effect, not the function signature</h2>
+<p>Before defining parameters, classify what the tool can do.</p>
+<div class="table-scroll"><table>
+<thead>
+<tr>
+<th>Class</th>
+<th>Examples</th>
+<th>Default control</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Read</td>
+<td>Search documents, inspect a task</td>
+<td>Auto-execute with audit</td>
+</tr>
+<tr>
+<td>Reversible write</td>
+<td>Create a draft, update a label</td>
+<td>Policy check and verification</td>
+</tr>
+<tr>
+<td>External communication</td>
+<td>Send email, post a message</td>
+<td>Preview and scoped confirmation</td>
+</tr>
+<tr>
+<td>Irreversible write</td>
+<td>Delete data, publish, transfer funds</td>
+<td>Explicit checkpoint and strong identity</td>
+</tr>
+</tbody></table></div>
+<p>Risk depends on more than the HTTP method. A <code>GET</code> endpoint can expose sensitive data; a reversible write may still affect thousands of records. Evaluate:</p>
+<ul>
+<li>reversibility;</li>
+<li>blast radius;</li>
+<li>data sensitivity;</li>
+<li>external visibility;</li>
+<li>financial or legal impact;</li>
+<li>time sensitivity;</li>
+<li>required identity.</li>
+</ul>
+<p>The resulting risk class should travel with the tool definition and appear in traces, policy decisions, and evaluation results.</p>
+<h2 id="section-2-define-a-complete-contract">2. Define a complete contract</h2>
+<h3 id="section-structural-contract">Structural contract</h3>
+<p>Use a strict schema:</p>
+<ul>
+<li>reject unknown fields;</li>
+<li>distinguish required, optional, and nullable values;</li>
+<li>use closed enums where possible;</li>
+<li>set string lengths and collection limits;</li>
+<li>specify formats for IDs, timestamps, currency, and time zones;</li>
+<li>avoid untyped <code>metadata</code> bags unless their contents are separately validated.</li>
+</ul>
+<pre><code class="language-json">{
+  &quot;type&quot;: &quot;object&quot;,
+  &quot;additionalProperties&quot;: false,
+  &quot;required&quot;: [&quot;calendar_id&quot;, &quot;title&quot;, &quot;start_at&quot;, &quot;end_at&quot;],
+  &quot;properties&quot;: {
+    &quot;calendar_id&quot;: {
+      &quot;type&quot;: &quot;string&quot;,
+      &quot;pattern&quot;: &quot;^cal_[a-z0-9]+$&quot;
+    },
+    &quot;title&quot;: {
+      &quot;type&quot;: &quot;string&quot;,
+      &quot;minLength&quot;: 1,
+      &quot;maxLength&quot;: 120
+    },
+    &quot;start_at&quot;: {
+      &quot;type&quot;: &quot;string&quot;,
+      &quot;format&quot;: &quot;date-time&quot;
+    },
+    &quot;end_at&quot;: {
+      &quot;type&quot;: &quot;string&quot;,
+      &quot;format&quot;: &quot;date-time&quot;
+    },
+    &quot;attendee_ids&quot;: {
+      &quot;type&quot;: &quot;array&quot;,
+      &quot;maxItems&quot;: 20,
+      &quot;items&quot;: {
+        &quot;type&quot;: &quot;string&quot;
+      }
+    }
+  }
+}
+</code></pre>
+<p>Schema validation should happen before authorization and execution. The downstream service should never receive an argument set that the harness already knows is invalid.</p>
+<h3 id="section-semantic-contract">Semantic contract</h3>
+<p>JSON Schema cannot express all business rules. Add deterministic validators for relationships such as:</p>
+<ul>
+<li><code>end_at</code> must be later than <code>start_at</code>;</li>
+<li>all attendees must belong to the allowed tenant;</li>
+<li>the selected currency must match the account;</li>
+<li>a task cannot transition directly from <code>draft</code> to <code>completed</code>;</li>
+<li>a batch operation cannot exceed the approved scope.</li>
+</ul>
+<p>Do not delegate rules with known answers to the model. Deterministic checks are cheaper, more stable, and easier to audit.</p>
+<h3 id="section-result-contract">Result contract</h3>
+<p>The result should separate business data from execution metadata:</p>
+<pre><code class="language-json">{
+  &quot;status&quot;: &quot;accepted&quot;,
+  &quot;data&quot;: {
+    &quot;event_id&quot;: &quot;evt_42&quot;
+  },
+  &quot;execution&quot;: {
+    &quot;request_id&quot;: &quot;req_91&quot;,
+    &quot;idempotency_key&quot;: &quot;task_8f2a:create_event:v1&quot;,
+    &quot;started_at&quot;: &quot;2026-09-30T10:18:22Z&quot;,
+    &quot;duration_ms&quot;: 184
+  }
+}
+</code></pre>
+<p>Avoid returning ambiguous strings such as <code>&quot;done&quot;</code> or <code>&quot;something went wrong&quot;</code>. The harness needs machine-readable states.</p>
+<h2 id="section-3-make-authorization-contextual">3. Make authorization contextual</h2>
+<p>Tool availability and tool authorization are different.</p>
+<p>The model may know that <code>delete_document</code> exists, but execution should depend on:</p>
+<ul>
+<li>the authenticated user;</li>
+<li>the current tenant or workspace;</li>
+<li>the target resource;</li>
+<li>the requested scope;</li>
+<li>the task&#39;s original intent;</li>
+<li>the risk class;</li>
+<li>whether confirmation is still valid.</li>
+</ul>
+<p>A useful policy decision returns more than allow or deny:</p>
+<pre><code class="language-json">{
+  &quot;decision&quot;: &quot;require_confirmation&quot;,
+  &quot;reason&quot;: &quot;external_visibility&quot;,
+  &quot;scope&quot;: {
+    &quot;tool&quot;: &quot;publish_document&quot;,
+    &quot;resource_id&quot;: &quot;doc_42&quot;,
+    &quot;version&quot;: 7
+  },
+  &quot;expires_at&quot;: &quot;2026-09-30T10:30:00Z&quot;
+}
+</code></pre>
+<p>Confirmation must bind to the exact action. A user approving &quot;publish version 7 of document 42&quot; should not authorize a later publish of version 8 or another document.</p>
+<h3 id="section-separate-preview-from-commit">Separate preview from commit</h3>
+<p>High-impact tools benefit from a two-phase interface:</p>
+<ol>
+<li><strong>Prepare</strong> validates inputs and returns a complete preview.</li>
+<li><strong>Commit</strong> accepts a preview ID and a scoped confirmation token.</li>
+</ol>
+<p>The preview should show the target, final content, recipients, monetary amount, and irreversible effects. The commit endpoint should reject stale previews.</p>
+<h2 id="section-4-design-idempotency-before-retries">4. Design idempotency before retries</h2>
+<p>Retries are only safe when repeated execution preserves the intended business result.</p>
+<h3 id="section-use-a-business-scoped-key">Use a business-scoped key</h3>
+<p>An idempotency key should identify the intent, not the network attempt:</p>
+<pre><code class="language-text">task_id + tool_name + normalized_target + semantic_version
+</code></pre>
+<p>Generating a random key for every retry defeats idempotency. Reusing one key across unrelated actions can incorrectly collapse valid operations.</p>
+<p>The downstream service should store:</p>
+<ul>
+<li>the idempotency key;</li>
+<li>a hash of normalized arguments;</li>
+<li>execution status;</li>
+<li>response or resource ID;</li>
+<li>retention expiry.</li>
+</ul>
+<p>If the same key arrives with different arguments, return a conflict instead of guessing.</p>
+<h3 id="section-treat-timeouts-as-unknown-outcomes">Treat timeouts as unknown outcomes</h3>
+<p>A timeout means the caller did not observe a result. It does not prove that the server did nothing.</p>
+<pre><code class="language-text">request sent
+  → caller timeout
+  → server may have committed
+  → retry without reconciliation
+  → duplicate side effect
+</code></pre>
+<p>After a timeout:</p>
+<ol>
+<li>query by idempotency key or business identifier;</li>
+<li>verify whether the desired object exists;</li>
+<li>continue if invariants match;</li>
+<li>compensate or escalate if state is partial;</li>
+<li>retry only if absence is authoritative.</li>
+</ol>
+<h2 id="section-5-use-typed-failure-semantics">5. Use typed failure semantics</h2>
+<p>The tool adapter should map service-specific errors into a small stable taxonomy.</p>
+<div class="table-scroll"><table>
+<thead>
+<tr>
+<th>Error type</th>
+<th>Retry?</th>
+<th>Typical action</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>TRANSIENT</code></td>
+<td>Yes, bounded</td>
+<td>Backoff and retry</td>
+</tr>
+<tr>
+<td><code>RATE_LIMITED</code></td>
+<td>Yes, scheduled</td>
+<td>Respect retry-after</td>
+</tr>
+<tr>
+<td><code>INVALID_INPUT</code></td>
+<td>No</td>
+<td>Correct arguments</td>
+</tr>
+<tr>
+<td><code>UNAUTHORIZED</code></td>
+<td>No</td>
+<td>Request authorization</td>
+</tr>
+<tr>
+<td><code>CONFLICT</code></td>
+<td>Usually no</td>
+<td>Re-read state and re-plan</td>
+</tr>
+<tr>
+<td><code>PARTIAL_SUCCESS</code></td>
+<td>No blind retry</td>
+<td>Reconcile or compensate</td>
+</tr>
+<tr>
+<td><code>UNKNOWN_OUTCOME</code></td>
+<td>Not yet</td>
+<td>Query authoritative state</td>
+</tr>
+<tr>
+<td><code>POLICY_BLOCKED</code></td>
+<td>No</td>
+<td>Explain boundary or escalate</td>
+</tr>
+</tbody></table></div>
+<p>The raw downstream message can still be attached for operators, but the decision loop should act on the typed category.</p>
+<h3 id="section-bound-every-retry-policy">Bound every retry policy</h3>
+<p>Define:</p>
+<ul>
+<li>maximum attempts;</li>
+<li>total retry time;</li>
+<li>exponential backoff and jitter;</li>
+<li>which errors qualify;</li>
+<li>whether the action consumes a side-effect budget;</li>
+<li>what evidence is required before another attempt.</li>
+</ul>
+<p>Retries without these limits can amplify outages and create tool-call storms.</p>
+<h2 id="section-6-verify-the-post-action-state">6. Verify the post-action state</h2>
+<p>The authoritative state is often different from the tool response.</p>
+<div class="table-scroll"><table>
+<thead>
+<tr>
+<th>Action</th>
+<th>Verification source</th>
+<th>Example invariant</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Create calendar event</td>
+<td>Calendar read API</td>
+<td>Time and attendee set match</td>
+</tr>
+<tr>
+<td>Send message</td>
+<td>Message history</td>
+<td>One message with idempotency key exists</td>
+</tr>
+<tr>
+<td>Update issue</td>
+<td>Issue read API</td>
+<td>State and assignee match</td>
+</tr>
+<tr>
+<td>Submit workflow</td>
+<td>Workflow instance API</td>
+<td>Instance is accepted and linked</td>
+</tr>
+<tr>
+<td>Delete object</td>
+<td>Object read or tombstone</td>
+<td>Object is absent or marked deleted</td>
+</tr>
+</tbody></table></div>
+<p>Verification should be:</p>
+<ul>
+<li><strong>independent</strong> when possible, using a read path rather than trusting the write response;</li>
+<li><strong>specific</strong>, comparing expected invariants;</li>
+<li><strong>bounded</strong>, with timeouts for eventually consistent systems;</li>
+<li><strong>recorded</strong>, so completion has evidence.</li>
+</ul>
+<pre><code class="language-python">result = create_event(request, idempotency_key)
+event = get_event(result.event_id)
+
+assert event.status == &quot;confirmed&quot;
+assert event.start_at == request.start_at
+assert required_attendees &lt;= set(event.attendee_ids)
+</code></pre>
+<p>If verification fails, do not report success. Return a typed partial or unknown state.</p>
+<h2 id="section-7-protect-sensitive-data">7. Protect sensitive data</h2>
+<p>Tool arguments and results often contain the most sensitive information in an agent trace. Protection should begin at the schema:</p>
+<ul>
+<li>mark secret and personal-data fields;</li>
+<li>exclude secrets from model-visible arguments where possible;</li>
+<li>use references to credentials rather than raw credentials;</li>
+<li>redact before logs and traces are emitted;</li>
+<li>hash stable identifiers used only for aggregation;</li>
+<li>store full payloads only behind restricted, short-retention access;</li>
+<li>prevent downstream error messages from echoing secrets.</li>
+</ul>
+<p>Avoid generic recursive redaction as the primary control. It misses encoded data and can over-redact useful evidence. Field-level policies are more reliable.</p>
+<h3 id="section-minimize-model-visible-output">Minimize model-visible output</h3>
+<p>The model rarely needs the entire API response. Tool adapters should return a bounded semantic result:</p>
+<pre><code class="language-json">{
+  &quot;event_id&quot;: &quot;evt_42&quot;,
+  &quot;status&quot;: &quot;confirmed&quot;,
+  &quot;start_at&quot;: &quot;2026-10-02T15:00:00+08:00&quot;,
+  &quot;attendee_count&quot;: 6
+}
+</code></pre>
+<p>Keep raw payloads outside the prompt for debugging under stricter access controls.</p>
+<h2 id="section-8-instrument-the-transaction">8. Instrument the transaction</h2>
+<p>Every call should emit enough telemetry to answer:</p>
+<ul>
+<li>Why was this tool selected?</li>
+<li>Which policy allowed it?</li>
+<li>Which normalized arguments were used?</li>
+<li>How long did validation, authorization, execution, and verification take?</li>
+<li>Was the operation retried?</li>
+<li>Did it change external state?</li>
+<li>Was the final state verified?</li>
+</ul>
+<p>A compact event schema:</p>
+<pre><code class="language-json">{
+  &quot;task_id&quot;: &quot;task_8f2a&quot;,
+  &quot;step_id&quot;: &quot;step_06&quot;,
+  &quot;tool&quot;: &quot;calendar.create_event&quot;,
+  &quot;tool_version&quot;: &quot;3&quot;,
+  &quot;risk&quot;: &quot;reversible_write&quot;,
+  &quot;policy_decision&quot;: &quot;allow&quot;,
+  &quot;attempt&quot;: 1,
+  &quot;duration_ms&quot;: 184,
+  &quot;result_type&quot;: &quot;success&quot;,
+  &quot;verification&quot;: &quot;passed&quot;,
+  &quot;input_tokens&quot;: 0,
+  &quot;output_bytes&quot;: 418
+}
+</code></pre>
+<p>Aggregate metrics should include tool selection accuracy, argument validity, authorization rejection rate, retry rate, unknown-outcome rate, verification failure rate, and P95 latency.</p>
+<h2 id="section-9-evaluate-tools-independently-from-the-full-agent">9. Evaluate tools independently from the full agent</h2>
+<p>Tool quality can be tested without a live model.</p>
+<h3 id="section-contract-tests">Contract tests</h3>
+<ul>
+<li>valid and invalid schemas;</li>
+<li>semantic boundary values;</li>
+<li>unknown-field rejection;</li>
+<li>stable error mapping;</li>
+<li>response size limits.</li>
+</ul>
+<h3 id="section-execution-tests">Execution tests</h3>
+<ul>
+<li>timeout before and after downstream commit;</li>
+<li>duplicate idempotency keys;</li>
+<li>partial success;</li>
+<li>stale confirmation;</li>
+<li>authorization changes between prepare and commit;</li>
+<li>eventual consistency during verification.</li>
+</ul>
+<h3 id="section-model-facing-tests">Model-facing tests</h3>
+<ul>
+<li>correct tool selection among similar tools;</li>
+<li>required arguments inferred only from evidence;</li>
+<li>no invention of IDs or enum values;</li>
+<li>safe behavior when required input is missing;</li>
+<li>resistance to instructions returned by an untrusted tool.</li>
+</ul>
+<p>Evaluate selection, arguments, execution, and verification separately. A single &quot;task passed&quot; label cannot reveal which contract failed.</p>
+<h2 id="section-release-checklist">Release checklist</h2>
+<h3 id="section-contract">Contract</h3>
+<ul>
+<li><input disabled type="checkbox"> Inputs and outputs are typed and documented.</li>
+<li><input disabled type="checkbox"> Unknown fields are rejected.</li>
+<li><input disabled type="checkbox"> Cross-field business rules are deterministic.</li>
+<li><input disabled type="checkbox"> Results distinguish accepted, completed, partial, and unknown states.</li>
+</ul>
+<h3 id="section-authorization-and-effects">Authorization and effects</h3>
+<ul>
+<li><input disabled type="checkbox"> Risk class and blast radius are declared.</li>
+<li><input disabled type="checkbox"> Authorization is evaluated against user, resource, scope, and intent.</li>
+<li><input disabled type="checkbox"> Confirmation binds to an exact action and expires.</li>
+<li><input disabled type="checkbox"> High-impact operations support preview before commit.</li>
+</ul>
+<h3 id="section-execution">Execution</h3>
+<ul>
+<li><input disabled type="checkbox"> Retries are bounded and limited to eligible errors.</li>
+<li><input disabled type="checkbox"> A business-scoped idempotency key is supported.</li>
+<li><input disabled type="checkbox"> Timeouts are treated as unknown outcomes.</li>
+<li><input disabled type="checkbox"> Partial completion is detectable.</li>
+<li><input disabled type="checkbox"> Compensation or reconciliation paths exist.</li>
+</ul>
+<h3 id="section-verification">Verification</h3>
+<ul>
+<li><input disabled type="checkbox"> The authoritative post-action state is readable.</li>
+<li><input disabled type="checkbox"> Success invariants are machine-checkable.</li>
+<li><input disabled type="checkbox"> Eventual consistency has a bounded policy.</li>
+<li><input disabled type="checkbox"> Completion records verification evidence.</li>
+</ul>
+<h3 id="section-privacy-and-observability">Privacy and observability</h3>
+<ul>
+<li><input disabled type="checkbox"> Sensitive fields are marked at schema level.</li>
+<li><input disabled type="checkbox"> Raw secrets never enter prompts or general logs.</li>
+<li><input disabled type="checkbox"> Tool traces include policy, latency, retries, and verification.</li>
+<li><input disabled type="checkbox"> Production failures feed regression tests.</li>
+</ul>
+<h2 id="section-conclusion">Conclusion</h2>
+<p>A reliable agent tool is not merely an API the model can call. It is a transaction protocol the harness can validate, authorize, execute, verify, observe, and recover.</p>
+<p>When that protocol is explicit, tool use becomes testable engineering rather than optimistic automation.</p>
+
+    </article>
+  </main>
+
+  <footer class="site-footer article-footer">
+    <a href="../sections/agent.html">Agent 探索 / 生产工程</a>
+    <a href="https://github.com/yjd953/yjd953/blob/main/posts/tool-use-checklist.md">View source ↗</a>
+  </footer>
+  <script src="../assets/site.js" defer></script>
+</body>
+</html>

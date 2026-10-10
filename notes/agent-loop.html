@@ -1,0 +1,261 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="沿着 Think、Act、Observe、Think 跟踪一次任务，分清模型决策和 Runtime 执行。">
+  <meta name="theme-color" content="#f1f1ee">
+  <title>Agent Loop：AI 为什么能够自己行动？ — Dale Yang</title>
+  <link rel="stylesheet" href="../assets/site.css">
+</head>
+<body class="article-page">
+  <div class="reading-progress" id="readingProgress" aria-hidden="true"></div>
+
+  <header class="site-header">
+    <a class="wordmark" href="../" aria-label="Dale Yang home">DY<span>.</span></a>
+    <nav aria-label="Primary">
+      <a href="../sections/agent.html">Agent 探索</a>
+      <a href="https://github.com/yjd953">GitHub</a>
+    </nav>
+  </header>
+
+  <main class="article-layout">
+    <header class="article-masthead">
+      <a class="back-link" href="../sections/agent.html">← Agent 探索</a>
+      <p class="kicker">01.03 / Agent loop / ZH</p>
+      <h1>Agent Loop：AI 为什么能够自己行动？</h1>
+      <p class="article-deck">沿着 Think、Act、Observe、Think 跟踪一次任务，分清模型决策和 Runtime 执行。</p>
+    </header>
+
+    <article class="prose">
+      <p>语言模型一次只能完成一次推理调用：读取输入，生成输出，然后结束。它不会在 API 返回后自己再次醒来，也不会真的打开网页、修改文件。</p>
+<p>Agent 看起来能够连续行动，是因为模型外面有一个循环不断做四件事：</p>
+<pre><code class="language-text">Think → Act → Observe → Think
+</code></pre>
+<p>其中 <code>Think</code> 和动作选择由模型完成，<code>Act</code> 的执行、<code>Observe</code> 的构造以及整个循环的生命周期由 Runtime 完成。</p>
+<h2 id="section-跟踪一个完整任务">跟踪一个完整任务</h2>
+<p>假设用户提出：</p>
+<blockquote>
+<p>找出仓库中测试失败的原因，修复后重新运行相关测试。</p>
+</blockquote>
+<p>Agent 可用的工具有：</p>
+<ul>
+<li><code>list_files</code></li>
+<li><code>read_file</code></li>
+<li><code>search_code</code></li>
+<li><code>apply_patch</code></li>
+<li><code>run_tests</code></li>
+</ul>
+<p>任务开始时，Runtime 建立状态：</p>
+<pre><code class="language-json">{
+  &quot;goal&quot;: &quot;定位并修复测试失败&quot;,
+  &quot;status&quot;: &quot;running&quot;,
+  &quot;step&quot;: 0,
+  &quot;changed_files&quot;: [],
+  &quot;test_results&quot;: [],
+  &quot;budget&quot;: {
+    &quot;max_steps&quot;: 20,
+    &quot;deadline_seconds&quot;: 300
+  }
+}
+</code></pre>
+<h3 id="section-第-1-轮从目标到动作">第 1 轮：从目标到动作</h3>
+<p>Runtime 把用户目标、工具描述和必要上下文发给模型。模型并没有看到完整仓库，只知道有哪些工具可以用。</p>
+<p>模型返回：</p>
+<pre><code class="language-json">{
+  &quot;name&quot;: &quot;run_tests&quot;,
+  &quot;arguments&quot;: {
+    &quot;target&quot;: &quot;tests/test_price.py&quot;
+  }
+}
+</code></pre>
+<p>这一步常被称作 Think，但工程上不要依赖模型暴露完整思维链。真正需要保存的是决策结果及其上下文：它选择了哪个工具、参数是什么、基于哪个模型版本、消耗了多少 Token。</p>
+<h3 id="section-第-2-轮runtime-执行动作">第 2 轮：Runtime 执行动作</h3>
+<p>Runtime 收到 Tool Call 后依次完成：</p>
+<ol>
+<li>确认 <code>run_tests</code> 存在；</li>
+<li>校验 <code>target</code> 参数；</li>
+<li>检查目标路径是否在工作区内；</li>
+<li>分配 60 秒超时；</li>
+<li>启动测试进程；</li>
+<li>捕获退出码、标准输出和标准错误。</li>
+</ol>
+<p>模型只表达“运行测试”的意图。进程管理、路径隔离和超时都不是模型完成的。</p>
+<p>工具返回：</p>
+<pre><code class="language-json">{
+  &quot;ok&quot;: false,
+  &quot;exit_code&quot;: 1,
+  &quot;summary&quot;: &quot;expected 1990, got 19.9&quot;,
+  &quot;location&quot;: &quot;tests/test_price.py:42&quot;
+}
+</code></pre>
+<h3 id="section-第-3-轮observation-不是原始世界">第 3 轮：Observation 不是原始世界</h3>
+<p>Runtime 不一定把十万行日志原样塞给模型。它会截断无关输出、保留错误栈和退出码，再构造成 Observation。</p>
+<p>这一步非常关键。模型只能依据它看到的 Observation 决策：</p>
+<ul>
+<li>如果省略了退出码，它可能把 Warning 当失败；</li>
+<li>如果截断了最前面的根因，它可能只看到后续连锁错误；</li>
+<li>如果工具把异常包装成普通文本，它可能误以为执行成功。</li>
+</ul>
+<p>Observation 是 Runtime 对环境的编码，不是环境本身。</p>
+<h3 id="section-第-4-轮反馈改变下一步">第 4 轮：反馈改变下一步</h3>
+<p>新的 Observation 被追加到 Context。模型看到金额差了 100 倍，决定搜索价格转换逻辑：</p>
+<pre><code class="language-json">{
+  &quot;name&quot;: &quot;search_code&quot;,
+  &quot;arguments&quot;: {
+    &quot;query&quot;: &quot;price_cents&quot;,
+    &quot;path&quot;: &quot;src&quot;
+  }
+}
+</code></pre>
+<p>搜索结果指向 <code>src/price.py</code>。下一轮模型读取文件，发现代码在入库时已经除以 100，展示时又除了一次。随后它生成补丁请求。</p>
+<p>Runtime 在真正修改前可以增加策略检查：</p>
+<ul>
+<li>只允许修改当前仓库；</li>
+<li>禁止修改依赖锁文件；</li>
+<li>补丁必须能干净应用；</li>
+<li>高风险目录需要人工确认。</li>
+</ul>
+<p>补丁应用后，模型再次调用测试。测试通过并不自动等于任务完成，Runtime 还可以要求验证：</p>
+<pre><code class="language-json">{
+  &quot;goal_satisfied&quot;: true,
+  &quot;evidence&quot;: {
+    &quot;tests_passed&quot;: 12,
+    &quot;tests_failed&quot;: 0,
+    &quot;changed_files&quot;: [&quot;src/price.py&quot;]
+  }
+}
+</code></pre>
+<p>最后模型根据这份事实生成给用户的总结。</p>
+<h2 id="section-loop-中究竟循环了什么">Loop 中究竟循环了什么</h2>
+<p>可以把每轮抽象为状态转移：</p>
+<pre><code class="language-text">Sₜ = 当前状态 + 当前 Context + 最新 Observation
+
+模型：Sₜ → Decisionₜ
+Runtime：Decisionₜ → Effectₜ + Observationₜ₊₁
+</code></pre>
+<p>下一轮不是对同一个 Prompt 重试，而是在新状态上重新决策。搜索结果、错误信息、文件改动和剩余预算都会改变后续路径。</p>
+<p>如果 Observation 不进入下一轮，系统只是连续调用工具；如果 State 不随动作更新，系统会忘记已经做过什么；如果没有停止条件，循环就可能永远继续。</p>
+<h2 id="section-模型负责决策runtime-负责事实">模型负责决策，Runtime 负责事实</h2>
+<p>两者的边界可以这样划分：</p>
+<div class="table-scroll"><table>
+<thead>
+<tr>
+<th>问题</th>
+<th>模型</th>
+<th>Runtime</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>下一步哪个动作最有意义</td>
+<td>负责</td>
+<td>提供候选与约束</td>
+</tr>
+<tr>
+<td>工具参数是否符合 Schema</td>
+<td>可能自检</td>
+<td>必须校验</td>
+</tr>
+<tr>
+<td>函数是否真的执行</td>
+<td>不负责</td>
+<td>负责</td>
+</tr>
+<tr>
+<td>文件是否已修改</td>
+<td>只能依据结果判断</td>
+<td>负责记录与核验</td>
+</tr>
+<tr>
+<td>是否超过预算</td>
+<td>可以参考</td>
+<td>必须强制</td>
+</tr>
+<tr>
+<td>失败是否可重试</td>
+<td>可以建议</td>
+<td>按策略决定</td>
+</tr>
+<tr>
+<td>高风险动作是否授权</td>
+<td>不能自行授权</td>
+<td>必须拦截</td>
+</tr>
+<tr>
+<td>最终结果是否有证据</td>
+<td>可以总结</td>
+<td>必须提供事实</td>
+</tr>
+</tbody></table></div>
+<p>一个常见错误，是让模型同时扮演裁判和运动员。模型说“文件已经修改”“邮件已经发送”，系统便直接相信。可靠 Runtime 要依据工具结果或外部查询确认副作用，而不是把自然语言声明当事实。</p>
+<h2 id="section-agent-loop-与-event-loop-有什么相似">Agent Loop 与 Event Loop 有什么相似</h2>
+<p>传统 Event Loop 也在重复：</p>
+<pre><code class="language-text">等待事件 → 分发处理器 → 执行回调 → 等待下一事件
+</code></pre>
+<p>例如 Node.js Runtime 根据事件类型查找确定的回调：</p>
+<pre><code class="language-text">socket readable → onReadable
+timer expired   → onTimeout
+</code></pre>
+<p>Agent Loop 与它有三个共同点：</p>
+<ol>
+<li>都由 Runtime 持有循环，而不是业务回调自己持有；</li>
+<li>都把外部结果转成事件或 Observation；</li>
+<li>都需要调度、超时、取消和错误隔离。</li>
+</ol>
+<p>但两者的分发机制根本不同。</p>
+<p>传统 Event Loop 的路由通常由代码确定：某种事件映射到某个处理器。Agent Loop 的路由由概率模型结合语义动态决定：相似的输入可能选择不同工具，同一个错误也可能产生不同修复路径。</p>
+<p>因此：</p>
+<pre><code class="language-text">Event Loop = 确定性调度器 + 预定义回调
+Agent Loop = 确定性运行边界 + 概率性决策器
+</code></pre>
+<p>Agent Runtime 不能因为模型具有推理能力，就放弃传统 Runtime 的职责。恰恰因为决策不确定，外层调度必须更严格。</p>
+<h2 id="section-三种常见-loop-结构">三种常见 Loop 结构</h2>
+<h3 id="section-react每轮决定一个动作">ReAct：每轮决定一个动作</h3>
+<pre><code class="language-text">观察 → 选一个工具 → 执行 → 再观察
+</code></pre>
+<p>优点是能快速利用新信息，适合探索和调试。缺点是模型调用次数多，容易绕圈。</p>
+<h3 id="section-plan-and-execute先计划再执行">Plan and Execute：先计划再执行</h3>
+<pre><code class="language-text">生成计划 → 执行步骤 1..N → 必要时重规划
+</code></pre>
+<p>它适合依赖关系明确的长任务，但早期错误计划可能把后续全部带偏。计划必须允许根据 Observation 修正。</p>
+<h3 id="section-workflow-agent外层确定局部开放">Workflow + Agent：外层确定，局部开放</h3>
+<pre><code class="language-text">固定阶段 A → Agent 子任务 → 审批 → 固定阶段 B
+</code></pre>
+<p>生产系统常采用这种混合方式。合规、支付、发布等关键阶段由状态机控制；信息收集和故障分析等开放问题交给模型。</p>
+<p>Agent 性并不是越强越好。模型只应获得解决不确定问题所需的最小控制权。</p>
+<h2 id="section-停止条件也是-loop-的一部分">停止条件也是 Loop 的一部分</h2>
+<p>一个完整循环至少要处理五类终止：</p>
+<ol>
+<li><strong>成功</strong>：目标满足且关键结果已验证；</li>
+<li><strong>失败</strong>：出现不可恢复错误；</li>
+<li><strong>超限</strong>：达到轮次、Token、费用或时间预算；</li>
+<li><strong>取消</strong>：用户或上游系统终止任务；</li>
+<li><strong>暂停</strong>：等待授权、补充信息或人工确认。</li>
+</ol>
+<p>只让模型输出 <code>final_answer</code> 作为停止条件是不够的。模型可能过早宣布完成，也可能反复尝试。Runtime 应拥有最终终止权，并把结束原因写入状态。</p>
+<h2 id="section-自主行动不是魔法">自主行动不是魔法</h2>
+<p>AI 看起来能自己行动，是三个条件同时成立的结果：</p>
+<ul>
+<li>模型能根据语义选择下一步；</li>
+<li>Runtime 能把选择变成真实操作；</li>
+<li>Observation 能回到下一轮，改变新的选择。</li>
+</ul>
+<p>模型提供开放环境中的决策能力，循环提供持续性，Runtime 提供现实约束。任何一部分缺失，系统都会退化：只有模型，是一次性回答；只有 Runtime，是固定工作流；没有可靠 Observation，是在错误世界模型上持续行动。</p>
+<p>所以理解 Agent 的第一步，不是研究它“想了什么”，而是完整追踪一次：</p>
+<pre><code class="language-text">谁产生决策？
+谁执行动作？
+谁记录事实？
+谁决定继续或停止？
+</code></pre>
+<p>这四个问题回答清楚，Agent 的自主性就从拟人化描述变成了可以实现、测试和调试的程序结构。</p>
+
+    </article>
+  </main>
+
+  <footer class="site-footer article-footer">
+    <a href="../sections/agent.html">Agent 探索 / 核心机制</a>
+    <a href="https://github.com/yjd953/yjd953/blob/main/posts/agent-loop.md">View source ↗</a>
+  </footer>
+  <script src="../assets/site.js" defer></script>
+</body>
+</html>

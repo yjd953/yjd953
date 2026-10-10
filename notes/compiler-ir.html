@@ -1,0 +1,339 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="从多语言、多架构与优化 Pass 出发，理解 IR 如何解耦源语言和目标 CPU。">
+  <meta name="theme-color" content="#f1f1ee">
+  <title>编译器为什么需要 IR？ — Dale Yang</title>
+  <link rel="stylesheet" href="../assets/site.css">
+</head>
+<body class="article-page">
+  <div class="reading-progress" id="readingProgress" aria-hidden="true"></div>
+
+  <header class="site-header">
+    <a class="wordmark" href="../" aria-label="Dale Yang home">DY<span>.</span></a>
+    <nav aria-label="Primary">
+      <a href="../sections/computer-systems.html">计算机底层</a>
+      <a href="https://github.com/yjd953">GitHub</a>
+    </nav>
+  </header>
+
+  <main class="article-layout">
+    <header class="article-masthead">
+      <a class="back-link" href="../sections/computer-systems.html">← 计算机底层</a>
+      <p class="kicker">02.04 / Compiler / ZH</p>
+      <h1>编译器为什么需要 IR？</h1>
+      <p class="article-deck">从多语言、多架构与优化 Pass 出发，理解 IR 如何解耦源语言和目标 CPU。</p>
+    </header>
+
+    <article class="prose">
+      <p>C、Go、Rust 的语法、类型系统和运行时差别很大；x86-64、ARM64、RISC-V 的寄存器和指令编码也不同。</p>
+<p>如果每种语言都直接为每种 CPU 写一套完整编译器，工程关系会变成：</p>
+<pre><code class="language-text">C    → x86 / ARM / RISC-V
+Go   → x86 / ARM / RISC-V
+Rust → x86 / ARM / RISC-V
+</code></pre>
+<p>语言数量为 N、目标架构数量为 M，直接组合接近 N × M。IR，Intermediate Representation，中间表示，在中间建立了一层可分析、可变换的语言，使前端和后端不必理解彼此所有细节。</p>
+<h2 id="section-ast-已经是中间结构为什么还不够">AST 已经是中间结构，为什么还不够</h2>
+<p>源代码：</p>
+<pre><code class="language-c">int f(int a, int b) {
+    int x = a + b;
+    return x * 2;
+}
+</code></pre>
+<p>Parser 构造 AST：</p>
+<pre><code class="language-text">FunctionDecl f
+├─ Parameters a, b
+└─ Body
+   ├─ VarDecl x
+   │  └─ Add(a, b)
+   └─ Return
+      └─ Multiply(x, 2)
+</code></pre>
+<p>AST 很适合保存源语言结构。错误信息需要知道变量声明、语句、泛型和源码位置。</p>
+<p>但 CPU 不执行“变量声明”和“Return 节点”。优化器也更关心：</p>
+<ul>
+<li>值从哪里定义；</li>
+<li>哪些操作有副作用；</li>
+<li>控制流从哪个基本块到哪个基本块；</li>
+<li>某个值在哪些路径上可达；</li>
+<li>内存读写是否可能指向同一位置。</li>
+</ul>
+<p>所以编译器会继续把 AST Lower 到更规整的 IR。</p>
+<h2 id="section-ir-把语法差异压成共同操作">IR 把语法差异压成共同操作</h2>
+<p>三种语言可能写：</p>
+<pre><code class="language-c">// C
+x = a + b;
+</code></pre>
+<pre><code class="language-go">// Go
+x := a + b
+</code></pre>
+<pre><code class="language-rust">// Rust
+let x = a + b;
+</code></pre>
+<p>通过类型检查后，它们都可以表示为近似：</p>
+<pre><code class="language-text">x = add_i32(a, b)
+</code></pre>
+<p>这不表示三种语言语义完全相同。溢出、别名、生命周期、异常、GC 和 Undefined Behavior 仍需在 Lowering 时编码为不同约束或操作。</p>
+<p>IR 的价值是把已经解释清楚的高级语义，转换成后续优化能够统一处理的形式。</p>
+<h2 id="section-为什么常用-ssa">为什么常用 SSA</h2>
+<p>Static Single Assignment 要求每个值只定义一次。</p>
+<p>普通形式：</p>
+<pre><code class="language-text">x = 1
+x = x + a
+x = x * b
+</code></pre>
+<p>SSA 形式：</p>
+<pre><code class="language-text">x0 = 1
+x1 = add(x0, a0)
+x2 = mul(x1, b0)
+</code></pre>
+<p>数据依赖立刻可见：<code>x2</code> 依赖 <code>x1</code>，<code>x1</code> 依赖 <code>x0</code> 和 <code>a0</code>。</p>
+<p>遇到分支：</p>
+<pre><code class="language-c">if (cond) {
+    x = 1;
+} else {
+    x = 2;
+}
+return x + 3;
+</code></pre>
+<p>SSA 使用 Phi 概念合并控制流：</p>
+<pre><code class="language-text">then:
+  x1 = 1
+  goto join
+
+else:
+  x2 = 2
+  goto join
+
+join:
+  x3 = phi(x1 from then, x2 from else)
+  y0 = add(x3, 3)
+  return y0
+</code></pre>
+<p>优化器无需猜测 <code>x</code> 当前是哪次赋值，Def-Use Chain 已经显式建立。</p>
+<h2 id="section-ir-让优化成为可复用-pass">IR 让优化成为可复用 Pass</h2>
+<p>有了统一 IR，可以编写独立优化 Pass。</p>
+<h3 id="section-constant-folding">Constant Folding</h3>
+<pre><code class="language-text">x = add_i32(20, 22)
+</code></pre>
+<p>变成：</p>
+<pre><code class="language-text">x = 42
+</code></pre>
+<h3 id="section-dead-code-elimination">Dead Code Elimination</h3>
+<pre><code class="language-text">x = expensive_compute()
+return 1
+</code></pre>
+<p>若 <code>expensive_compute</code> 无副作用且 <code>x</code> 未使用，可以删除。</p>
+<h3 id="section-common-subexpression-elimination">Common Subexpression Elimination</h3>
+<pre><code class="language-text">x = add(a, b)
+y = add(a, b)
+</code></pre>
+<p>在条件允许时复用第一次结果。</p>
+<h3 id="section-loop-invariant-code-motion">Loop Invariant Code Motion</h3>
+<pre><code class="language-text">for each i:
+    t = width * height
+    out[i] = in[i] * t
+</code></pre>
+<p>若 <code>width</code>、<code>height</code> 在循环中不变，把乘法移到循环外。</p>
+<p>这些优化若直接作用于 C AST、Go AST 和 Rust AST，需要重复理解每种语法。作用于统一 IR 后，核心算法可复用。</p>
+<h2 id="section-ir-也让分析成为可能">IR 也让分析成为可能</h2>
+<p>优化不是文本替换，它必须证明变换不改变程序语义。</p>
+<p>常见分析包括：</p>
+<ul>
+<li>Control Flow Graph；</li>
+<li>Dominator Tree；</li>
+<li>Liveness Analysis；</li>
+<li>Alias Analysis；</li>
+<li>Escape Analysis；</li>
+<li>Range Analysis；</li>
+<li>Call Graph。</li>
+</ul>
+<p>例如删除数组边界检查，需要证明索引一定落在合法范围。若 IR 能表达：</p>
+<pre><code class="language-text">0 &lt;= i &lt; len(slice)
+</code></pre>
+<p>Range Analysis 才可能给出证明。</p>
+<p>IR 不只是“另一种汇编”，它还承载优化所需的事实与约束。</p>
+<h2 id="section-为什么不只设计一种万能-ir">为什么不只设计一种万能 IR</h2>
+<p>离源语言越近，越容易保留高级语义；离机器越近，越容易做硬件相关优化。单一 IR 很难同时做好两端。</p>
+<p>现代编译器通常使用多层 IR：</p>
+<pre><code class="language-text">Source
+→ AST / HIR
+→ Typed IR
+→ Control-flow / SSA IR
+→ Machine IR
+→ Assembly / Machine Code
+</code></pre>
+<h3 id="section-high-level-ir">High-level IR</h3>
+<p>保留：</p>
+<ul>
+<li>泛型；</li>
+<li>所有权；</li>
+<li>闭包；</li>
+<li>异步结构；</li>
+<li>语言级类型。</li>
+</ul>
+<p>适合做语言专属检查与变换。</p>
+<h3 id="section-mid-level-ir">Mid-level IR</h3>
+<p>把语法降低为控制流、显式值和内存操作，适合通用优化。</p>
+<h3 id="section-low-level-machine-ir">Low-level / Machine IR</h3>
+<p>接近目标指令，已经考虑：</p>
+<ul>
+<li>目标寄存器类；</li>
+<li>指令合法形式；</li>
+<li>调用约定；</li>
+<li>CPU Feature；</li>
+<li>指令延迟与吞吐。</li>
+</ul>
+<p>适合 Instruction Selection、Register Allocation 和 Scheduling。</p>
+<p>“IR”不是一个固定文件格式，而是编译器不同阶段内部语言的总称。</p>
+<h2 id="section-cgorust-实际如何使用-ir">C、Go、Rust 实际如何使用 IR</h2>
+<h3 id="section-c-clang-llvm">C / Clang / LLVM</h3>
+<p>典型链路：</p>
+<pre><code class="language-text">C Source
+→ Clang AST
+→ LLVM IR
+→ Target-specific Machine IR
+→ Assembly
+</code></pre>
+<p>LLVM IR 近似类型化 SSA：</p>
+<pre><code class="language-llvm">define i32 @add(i32 %a, i32 %b) {
+entry:
+  %sum = add i32 %a, %b
+  ret i32 %sum
+}
+</code></pre>
+<h3 id="section-rust">Rust</h3>
+<p>Rust 编译器需要先处理宏、类型、Trait 和所有权，再生成 MIR：</p>
+<pre><code class="language-text">Rust Source
+→ AST / HIR
+→ THIR / MIR
+→ LLVM IR（常见后端）
+→ Machine Code
+</code></pre>
+<p>Borrow Checker 等语言语义不应等到低层机器 IR 才处理，因为那时所有权结构已经丢失。</p>
+<h3 id="section-go">Go</h3>
+<p>Go 官方编译器不依赖 LLVM 作为默认后端，它有自己的内部 IR 与 SSA 后端：</p>
+<pre><code class="language-text">Go Source
+→ Syntax / Typed IR
+→ SSA
+→ Architecture-specific operations
+→ Machine Code
+</code></pre>
+<p>这说明“需要 IR”不等于“必须使用 LLVM”。LLVM 是一套流行基础设施，IR 是更普遍的编译器设计思想。</p>
+<h2 id="section-ir-如何解耦语言与-cpu">IR 如何解耦语言与 CPU</h2>
+<p>假设编译器前端把不同语言都降低到一套中层操作：</p>
+<pre><code class="language-text">add_i64
+load
+store
+branch
+call
+</code></pre>
+<p>前端负责：</p>
+<pre><code class="language-text">源语言语法与类型
+→ 正确的 IR 语义
+</code></pre>
+<p>后端负责：</p>
+<pre><code class="language-text">IR 操作
+→ 某个 CPU 的合法高效指令
+</code></pre>
+<p>新增一门语言时，可以复用已有后端；新增一个 CPU 后端时，可以服务多个前端。实际工程并非完美 N+M，因为语言 Runtime 和架构特性仍有交叉，但耦合大幅降低。</p>
+<h2 id="section-解耦不等于抹平差异">解耦不等于抹平差异</h2>
+<p>考虑整数溢出：</p>
+<ul>
+<li>某些 C 有符号溢出属于 Undefined Behavior；</li>
+<li>Rust Debug 构建常检查溢出，Release 行为依配置；</li>
+<li>Go 整数运算有明确的二进制结果规则。</li>
+</ul>
+<p>如果前端都粗暴生成同一个 <code>add</code>，优化器可能错误改变语义。IR 需要表达：</p>
+<pre><code class="language-text">普通环绕加法
+带溢出检查的加法
+假设不溢出的加法
+饱和加法
+</code></pre>
+<p>再如内存：</p>
+<ul>
+<li>Rust 的借用信息可帮助别名分析；</li>
+<li>Go 需要 GC 指针信息和 Write Barrier；</li>
+<li>C 的指针规则影响优化边界。</li>
+</ul>
+<p>好的 Lowering 不是丢掉一切高级语义，而是把后续阶段仍需依赖的语义编码下来。</p>
+<h2 id="section-ir-到机器码还差什么">IR 到机器码还差什么</h2>
+<p>通用 IR 可能允许无限数量的虚拟值：</p>
+<pre><code class="language-text">v1, v2, v3, ... v1000
+</code></pre>
+<p>真实 CPU 只有有限寄存器。Register Allocator 必须决定：</p>
+<ul>
+<li>哪些值留在寄存器；</li>
+<li>哪些值 Spill 到栈；</li>
+<li>哪些寄存器需要跨函数保存。</li>
+</ul>
+<p>IR 的 <code>add_i64</code> 也不必一一对应单条机器指令。后端可能选择：</p>
+<ul>
+<li>x86 的某种 <code>ADD</code> 或 <code>LEA</code>；</li>
+<li>ARM64 的 <code>ADD</code>；</li>
+<li>向量指令；</li>
+<li>多条指令组合。</li>
+</ul>
+<p>目标 CPU 的指令集、微架构成本模型和 ABI 在这一阶段进入决策。</p>
+<h2 id="section-ir-也是正确性边界">IR 也是正确性边界</h2>
+<p>每次 Lowering 都需要保持语义：</p>
+<pre><code class="language-text">Source semantics
+  ≡ High-level IR
+  ≡ Optimized IR
+  ≡ Machine IR
+  ≡ Machine Code observable behavior
+</code></pre>
+<p>编译器 Bug 常发生在某个 Pass 错误证明了等价性。测试方法包括：</p>
+<ul>
+<li>单元测试某个 IR Pass；</li>
+<li>Differential Testing；</li>
+<li>Fuzzing；</li>
+<li>比较优化前后执行结果；</li>
+<li>Formal Verification。</li>
+</ul>
+<p>IR 使这些阶段可检查。如果所有逻辑从 AST 一步直达机器码，中间变换会更难观察和验证。</p>
+<h2 id="section-用工具看见-ir">用工具看见 IR</h2>
+<p>C / Clang：</p>
+<pre><code class="language-bash">clang -S -emit-llvm add.c -o add.ll
+clang -O2 -S -emit-llvm add.c -o add.opt.ll
+</code></pre>
+<p>Rust 可通过编译器选项观察 MIR，但部分选项依赖 Nightly：</p>
+<pre><code class="language-bash">rustc +nightly -Z unpretty=mir app.rs
+</code></pre>
+<p>Go 可以查看 SSA 调试输出或最终汇编；具体环境变量与调试选项随 Go 版本变化，最稳定的入口仍是：</p>
+<pre><code class="language-bash">go build -gcflags=&#39;-S&#39; .
+go tool objdump ./app
+</code></pre>
+<p>观察时重点不是记住打印格式，而是比较：</p>
+<ul>
+<li>高级变量何时变成 SSA 值；</li>
+<li>分支何时变成 Basic Block；</li>
+<li>常量和无用代码在哪一层消失；</li>
+<li>架构寄存器何时出现。</li>
+</ul>
+<h2 id="section-ir-的真正价值">IR 的真正价值</h2>
+<p>IR 同时建立了三种边界：</p>
+<pre><code class="language-text">语言边界：
+  复杂语法 → 明确操作与控制流
+
+优化边界：
+  在可分析结构上证明并执行等价变换
+
+硬件边界：
+  通用操作 → 目标架构指令与寄存器
+</code></pre>
+<p>所以编译器需要 IR，不只是为了支持更多 CPU，也不只是为了做优化。它把“理解源语言”和“驾驭目标机器”拆成可以独立演进、反复验证的阶段。</p>
+<p>程序最终仍会变成机器码，但在变成机器码之前，IR 给编译器提供了一个最重要的工作空间：既比源代码规则，又还没有被某一颗 CPU 的细节锁死。</p>
+
+    </article>
+  </main>
+
+  <footer class="site-footer article-footer">
+    <a href="../sections/computer-systems.html">计算机底层 / 代码如何运行</a>
+    <a href="https://github.com/yjd953/yjd953/blob/main/posts/compiler-ir.md">View source ↗</a>
+  </footer>
+  <script src="../assets/site.js" defer></script>
+</body>
+</html>

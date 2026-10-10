@@ -1,0 +1,216 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="从最小 Agent Loop 出发，拆解工具、Memory、Runtime、MCP、Trace 与可靠性工程。">
+  <meta name="theme-color" content="#f1f1ee">
+  <title>Agent 探索 — Dale Yang</title>
+  <link rel="stylesheet" href="../assets/site.css">
+</head>
+<body class="section-page">
+  <div class="reading-progress" id="readingProgress" aria-hidden="true"></div>
+
+  <header class="site-header">
+    <a class="wordmark" href="../" aria-label="Dale Yang home">DY<span>.</span></a>
+    <nav aria-label="Primary">
+      <a href="../">All modules</a>
+      <a href="https://github.com/yjd953">GitHub</a>
+    </nav>
+  </header>
+
+  <main class="section-layout">
+    <header class="section-masthead">
+      <a class="back-link" href="../">← All modules</a>
+      <p class="kicker">01 / Agent systems</p>
+      <h1>Agent 探索<span>.</span></h1>
+      <p>从最小 Agent Loop 出发，拆解工具、Memory、Runtime、MCP、Trace 与可靠性工程。</p>
+    </header>
+
+      <section class="section-group" aria-labelledby="group-核心机制">
+        <div class="section-label">
+          <h2 id="group-核心机制">核心机制</h2>
+          <span>14 notes</span>
+        </div>
+        <div class="note-list">
+          <a class="note-row" href="../notes/what-is-agent.html">
+            <span class="note-number">01</span>
+            <span class="note-copy">
+              <span class="note-meta">Agent foundations / ZH / 边界与组成</span>
+              <strong>Agent 到底是什么？</strong>
+              <span class="note-description">从 LLM 生成答案到闭环行动，找到“调用工具的 LLM”和 Agent 的真正分界线。</span>
+            </span>
+            <span class="note-arrow" aria-hidden="true">↗</span>
+          </a>
+          <a class="note-row" href="../notes/minimal-agent-code.html">
+            <span class="note-number">02</span>
+            <span class="note-copy">
+              <span class="note-meta">Agent loop / ZH / Python 实现</span>
+              <strong>一个 Agent 最少需要多少代码？</strong>
+              <span class="note-description">从几十行循环开始，逐步加入 Memory、Retry、Timeout 与并行工具调用。</span>
+            </span>
+            <span class="note-arrow" aria-hidden="true">↗</span>
+          </a>
+          <a class="note-row" href="../notes/agent-loop.html">
+            <span class="note-number">03</span>
+            <span class="note-copy">
+              <span class="note-meta">Agent loop / ZH / 执行追踪</span>
+              <strong>Agent Loop：AI 为什么能够自己行动？</strong>
+              <span class="note-description">沿着 Think、Act、Observe、Think 跟踪一次任务，分清模型决策和 Runtime 执行。</span>
+            </span>
+            <span class="note-arrow" aria-hidden="true">↗</span>
+          </a>
+          <a class="note-row" href="../notes/tool-calling-internals.html">
+            <span class="note-number">04</span>
+            <span class="note-copy">
+              <span class="note-meta">Tool calling / ZH / 完整链路</span>
+              <strong>Tool Calling 到底发生了什么？</strong>
+              <span class="note-description">从 JSON Tool Call 一路追踪到注册表、参数校验、函数执行和结果回传。</span>
+            </span>
+            <span class="note-arrow" aria-hidden="true">↗</span>
+          </a>
+          <a class="note-row" href="../notes/agent-runtime.html">
+            <span class="note-number">05</span>
+            <span class="note-copy">
+              <span class="note-meta">Runtime / ZH / 系统组件</span>
+              <strong>Agent Runtime 到底是什么？</strong>
+              <span class="note-description">拆解 Tool Executor、Context、State、Session、Retry、Timeout 与 Cancellation。</span>
+            </span>
+            <span class="note-arrow" aria-hidden="true">↗</span>
+          </a>
+          <a class="note-row" href="../notes/agent-memory.html">
+            <span class="note-number">06</span>
+            <span class="note-copy">
+              <span class="note-meta">Memory / ZH / 存储与检索</span>
+              <strong>Agent 的 Memory 到底是不是“记忆”？</strong>
+              <span class="note-description">辨析 History、短期与长期 Memory、Vector DB、KV Store 和 Summary Memory。</span>
+            </span>
+            <span class="note-arrow" aria-hidden="true">↗</span>
+          </a>
+          <a class="note-row" href="../notes/context-window-vs-memory.html">
+            <span class="note-number">07</span>
+            <span class="note-copy">
+              <span class="note-meta">Context / ZH / 四个概念</span>
+              <strong>Context Window 为什么不是 Agent Memory？</strong>
+              <span class="note-description">通过长期运行任务，严格区分 Context、Memory、State 与 Knowledge。</span>
+            </span>
+            <span class="note-arrow" aria-hidden="true">↗</span>
+          </a>
+          <a class="note-row" href="../notes/skill-tool-mcp-cli.html">
+            <span class="note-number">08</span>
+            <span class="note-copy">
+              <span class="note-meta">Interfaces / ZH / 分层比较</span>
+              <strong>Skill、Tool、MCP、CLI 到底有什么区别？</strong>
+              <span class="note-description">把 Skill、Tool、MCP、CLI 与 API 放进同一项任务，观察它们各自所在的层。</span>
+            </span>
+            <span class="note-arrow" aria-hidden="true">↗</span>
+          </a>
+          <a class="note-row" href="../notes/what-mcp-solves.html">
+            <span class="note-number">09</span>
+            <span class="note-copy">
+              <span class="note-meta">MCP / ZH / 协议边界</span>
+              <strong>MCP 到底解决了什么问题？</strong>
+              <span class="note-description">从大量工具接入的重复成本出发，理解 Discovery、Schema、Transport 和资源模型。</span>
+            </span>
+            <span class="note-arrow" aria-hidden="true">↗</span>
+          </a>
+          <a class="note-row" href="../notes/wrong-tool-selection.html">
+            <span class="note-number">10</span>
+            <span class="note-copy">
+              <span class="note-meta">Debugging / ZH / 故障案例</span>
+              <strong>Agent 为什么会调用错误的 Tool？</strong>
+              <span class="note-description">从一次选错工具的真实式故障，建立 Prompt 到 Runtime Mapping 的排查路径。</span>
+            </span>
+            <span class="note-arrow" aria-hidden="true">↗</span>
+          </a>
+          <a class="note-row" href="../notes/agent-trace.html">
+            <span class="note-number">11</span>
+            <span class="note-copy">
+              <span class="note-meta">Observability / ZH / 数据模型</span>
+              <strong>Agent 为什么需要 Trace？</strong>
+              <span class="note-description">解释普通日志为何不够，并设计一套可以回放 LLM 与工具调用的 Trace 结构。</span>
+            </span>
+            <span class="note-arrow" aria-hidden="true">↗</span>
+          </a>
+          <a class="note-row" href="../notes/reliable-agent-tools.html">
+            <span class="note-number">12</span>
+            <span class="note-copy">
+              <span class="note-meta">Tool systems / ZH / 生产设计</span>
+              <strong>如何设计一个可靠的 Agent Tool 系统？</strong>
+              <span class="note-description">围绕校验、权限、超时、重试、幂等、追踪和版本控制构建 Runtime 防线。</span>
+            </span>
+            <span class="note-arrow" aria-hidden="true">↗</span>
+          </a>
+          <a class="note-row" href="../notes/agent-debugging.html">
+            <span class="note-number">13</span>
+            <span class="note-copy">
+              <span class="note-meta">Debugging / ZH / 方法论</span>
+              <strong>Agent 最难 Debug 的地方，为什么不是代码？</strong>
+              <span class="note-description">面对非确定性决策链，把调试重心从静态代码迁移到可复现的执行轨迹。</span>
+            </span>
+            <span class="note-arrow" aria-hidden="true">↗</span>
+          </a>
+          <a class="note-row" href="../notes/agent-as-program.html">
+            <span class="note-number">14</span>
+            <span class="note-copy">
+              <span class="note-meta">Programming model / ZH / 开放讨论</span>
+              <strong>Agent 是不是一种新的程序？</strong>
+              <span class="note-description">比较 Function、Process、State、Database、Scheduler 与 Agent 系统中的对应物。</span>
+            </span>
+            <span class="note-arrow" aria-hidden="true">↗</span>
+          </a>
+        </div>
+      </section>
+      <section class="section-group" aria-labelledby="group-生产工程">
+        <div class="section-label">
+          <h2 id="group-生产工程">生产工程</h2>
+          <span>04 notes</span>
+        </div>
+        <div class="note-list">
+          <a class="note-row" href="../notes/agent-reliability.html">
+            <span class="note-number">15</span>
+            <span class="note-copy">
+              <span class="note-meta">Agent systems / EN / 7 sections</span>
+              <strong>From Demo to Production: Four Reliability Pillars for Agents</strong>
+              <span class="note-description">A production architecture for explicit state, bounded execution, verified effects, and recovery.</span>
+            </span>
+            <span class="note-arrow" aria-hidden="true">↗</span>
+          </a>
+          <a class="note-row" href="../notes/tool-use-checklist.html">
+            <span class="note-number">16</span>
+            <span class="note-copy">
+              <span class="note-meta">Tooling / EN / 9 sections</span>
+              <strong>A Practical Tool-Use Checklist</strong>
+              <span class="note-description">How to design tool contracts, authorization, idempotency, verification, and recovery.</span>
+            </span>
+            <span class="note-arrow" aria-hidden="true">↗</span>
+          </a>
+          <a class="note-row" href="../notes/trace-native-evaluation.html">
+            <span class="note-number">17</span>
+            <span class="note-copy">
+              <span class="note-meta">Evaluation / EN / 9 sections</span>
+              <strong>Trace-Native Evaluation: From a Score to a Release Gate</strong>
+              <span class="note-description">Connect offline replay, trace diagnosis, production signals, and release gates.</span>
+            </span>
+            <span class="note-arrow" aria-hidden="true">↗</span>
+          </a>
+          <a class="note-row" href="../notes/agent-observability.html">
+            <span class="note-number">18</span>
+            <span class="note-copy">
+              <span class="note-meta">Observability / EN / 12 sections</span>
+              <strong>Agent Observability: Metrics That Expose Failure</strong>
+              <span class="note-description">Measure verified outcomes, execution depth, token cost, latency, tools, and human control.</span>
+            </span>
+            <span class="note-arrow" aria-hidden="true">↗</span>
+          </a>
+        </div>
+      </section>
+  </main>
+
+  <footer class="site-footer">
+    <a href="../">Dale Yang / Engineering paths</a>
+    <span>18 篇文章</span>
+  </footer>
+  <script src="../assets/site.js" defer></script>
+</body>
+</html>

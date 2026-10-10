@@ -1,0 +1,249 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="辨析 History、短期与长期 Memory、Vector DB、KV Store 和 Summary Memory。">
+  <meta name="theme-color" content="#f1f1ee">
+  <title>Agent 的 Memory 到底是不是“记忆”？ — Dale Yang</title>
+  <link rel="stylesheet" href="../assets/site.css">
+</head>
+<body class="article-page">
+  <div class="reading-progress" id="readingProgress" aria-hidden="true"></div>
+
+  <header class="site-header">
+    <a class="wordmark" href="../" aria-label="Dale Yang home">DY<span>.</span></a>
+    <nav aria-label="Primary">
+      <a href="../sections/agent.html">Agent 探索</a>
+      <a href="https://github.com/yjd953">GitHub</a>
+    </nav>
+  </header>
+
+  <main class="article-layout">
+    <header class="article-masthead">
+      <a class="back-link" href="../sections/agent.html">← Agent 探索</a>
+      <p class="kicker">01.06 / Memory / ZH</p>
+      <h1>Agent 的 Memory 到底是不是“记忆”？</h1>
+      <p class="article-deck">辨析 History、短期与长期 Memory、Vector DB、KV Store 和 Summary Memory。</p>
+    </header>
+
+    <article class="prose">
+      <p>人类说“我记得”时，通常意味着过去经历在脑中留下了可被唤起的痕迹。Agent 的 Memory 很容易借用这种直觉，但工程实现更朴素：</p>
+<pre><code class="language-text">写入外部存储 → 在未来检索 → 选择一部分 → 放回模型 Context
+</code></pre>
+<p>模型并没有在两次 API 调用之间持续保持意识。某段信息如果没有被重新放进当前输入，对这一轮模型来说就等于不存在。</p>
+<h2 id="section-先拆开最容易混淆的几层">先拆开最容易混淆的几层</h2>
+<h3 id="section-conversation-history发生过什么">Conversation History：发生过什么</h3>
+<p>最直接的做法，是保存消息列表：</p>
+<pre><code class="language-json">[
+  {&quot;role&quot;: &quot;user&quot;, &quot;content&quot;: &quot;我下周去上海&quot;},
+  {&quot;role&quot;: &quot;assistant&quot;, &quot;content&quot;: &quot;好的，需要规划行程吗？&quot;},
+  {&quot;role&quot;: &quot;user&quot;, &quot;content&quot;: &quot;帮我订周二晚上的酒店&quot;}
+]
+</code></pre>
+<p>第二轮中的“上海”来自历史消息。Conversation History 是原始事件记录，优点是保真，缺点是会无限增长。</p>
+<p>它并不自动等于 Memory。只有当 Runtime 保存并在后续选择性注入时，它才发挥记忆作用。</p>
+<h3 id="section-context这一轮能看到什么">Context：这一轮能看到什么</h3>
+<p>Context 是一次模型调用的即时工作区。它可能包含最近对话，也可能包含工具结果、系统规则、检索知识和任务状态。</p>
+<p>Context 具有三个性质：</p>
+<ul>
+<li>有长度上限；</li>
+<li>调用结束后不会自动持续；</li>
+<li>内容由 Runtime 在每一轮重新构造。</li>
+</ul>
+<p>因此把完整历史放进 Context，只是一种最简单的 Memory 读取策略，不是 Memory 的定义。</p>
+<h3 id="section-short-term-memory当前任务还需要什么">Short-term Memory：当前任务还需要什么</h3>
+<p>短期 Memory 保存当前任务中的临时事实，例如：</p>
+<pre><code class="language-json">{
+  &quot;destination&quot;: &quot;上海&quot;,
+  &quot;check_in&quot;: &quot;2026-10-06&quot;,
+  &quot;budget_cny&quot;: 800,
+  &quot;candidate_hotels&quot;: [&quot;hotel_17&quot;, &quot;hotel_42&quot;],
+  &quot;pending_question&quot;: &quot;是否需要早餐&quot;
+}
+</code></pre>
+<p>它通常按 Session 或 Run 隔离，任务结束后可以删除或归档。相比反复扫描聊天记录，结构化字段更稳定，也更容易校验。</p>
+<h3 id="section-long-term-memory跨任务保留什么">Long-term Memory：跨任务保留什么</h3>
+<p>长期 Memory 保存未来仍可能有用的信息，例如用户偏好、项目决策或已验证经验：</p>
+<pre><code class="language-json">{
+  &quot;subject&quot;: &quot;user_123&quot;,
+  &quot;fact&quot;: &quot;酒店预算通常不超过 800 元&quot;,
+  &quot;source&quot;: &quot;session_20260930&quot;,
+  &quot;confidence&quot;: 0.92,
+  &quot;valid_from&quot;: &quot;2026-09-30&quot;,
+  &quot;expires_at&quot;: null
+}
+</code></pre>
+<p>“长期”描述生命周期，不代表信息永远正确。偏好会变化，项目决策会废弃，Memory 需要版本、来源、置信度和失效机制。</p>
+<h2 id="section-vector-db-不是-memory-的同义词">Vector DB 不是 Memory 的同义词</h2>
+<p>向量数据库解决的是相似性检索：</p>
+<pre><code class="language-text">文本 → Embedding → 向量
+查询 → Embedding → 找相近向量
+</code></pre>
+<p>它适合召回语义近似的非结构化片段，比如过去讨论过的设计决策。但它不擅长所有问题：</p>
+<ul>
+<li>“用户最新预算是多少”需要按时间和字段精确查询；</li>
+<li>“订单是否已经支付”需要权威业务数据库；</li>
+<li>“任务当前执行到第几步”需要 State Store；</li>
+<li>“过去哪条经验与这个错误相似”才适合向量检索。</li>
+</ul>
+<p>把所有东西都塞进 Vector DB，会丢失精确更新、唯一约束、排序和事务语义。</p>
+<h2 id="section-kv-store-解决另一类问题">KV Store 解决另一类问题</h2>
+<p>键值或关系存储更适合确定性事实：</p>
+<pre><code class="language-text">user:123:preferred_language → zh-CN
+run:456:current_step        → 7
+project:abc:deploy_region   → cn-north
+</code></pre>
+<p>它可以精确覆盖旧值，读取成本稳定，也容易做权限隔离。代价是写入前必须知道结构，不能像向量检索那样用自然语言模糊召回。</p>
+<p>成熟系统常组合使用：</p>
+<pre><code class="language-text">KV / SQL       → 身份、偏好、状态、约束
+Vector Store   → 非结构化经历与语义片段
+Object Storage → 大文件、完整轨迹、原始证据
+</code></pre>
+<p>Memory 是这一整套写入和读取策略，不是哪一种数据库产品。</p>
+<h2 id="section-summary-memory-会压缩也会失真">Summary Memory 会压缩，也会失真</h2>
+<p>当历史超过 Context Window，可以把早期对话总结成：</p>
+<pre><code class="language-text">用户计划 10 月 6 日入住上海酒店，预算 800 元，
+偏好靠近地铁，尚未确认是否需要早餐。
+</code></pre>
+<p>Summary 降低 Token 消耗，却引入信息损失。原始对话可能还说过“预算必要时可到 1000 元”，摘要若省略这句话，后续推荐就会偏窄。</p>
+<p>因此 Summary 最好满足：</p>
+<ul>
+<li>保留指向原始消息的引用；</li>
+<li>区分用户原话与模型推断；</li>
+<li>对关键数字、日期、否定词做结构化提取；</li>
+<li>允许新事实覆盖旧事实；</li>
+<li>重要操作前回看权威原文。</li>
+</ul>
+<p>Summary 是有损索引，不应成为唯一事实来源。</p>
+<h2 id="section-memory-的完整生命周期">Memory 的完整生命周期</h2>
+<h3 id="section-1-capture哪些内容值得候选">1. Capture：哪些内容值得候选</h3>
+<p>不能把每句话都永久保存。闲聊、临时验证码、错误推测和敏感信息不应默认进入长期 Memory。</p>
+<p>候选规则可以结合：</p>
+<ul>
+<li>用户显式要求“记住”；</li>
+<li>信息是否会跨任务复用；</li>
+<li>是否来自可信来源；</li>
+<li>是否涉及敏感数据；</li>
+<li>是否已有同类事实。</li>
+</ul>
+<h3 id="section-2-consolidate如何整理与去重">2. Consolidate：如何整理与去重</h3>
+<p>新消息说“预算改成 1000”，系统不应同时把 800 和 1000 当作当前值。需要合并、覆盖或建立时间版本。</p>
+<pre><code class="language-json">{
+  &quot;key&quot;: &quot;hotel_budget&quot;,
+  &quot;value&quot;: 1000,
+  &quot;supersedes&quot;: &quot;memory_older&quot;,
+  &quot;observed_at&quot;: &quot;2026-10-01&quot;
+}
+</code></pre>
+<h3 id="section-3-retrieve当前问题需要找什么">3. Retrieve：当前问题需要找什么</h3>
+<p>检索不是只看向量相似度。常见评分还包括：</p>
+<pre><code class="language-text">score =
+  semantic_similarity
+  × recency_weight
+  × source_trust
+  × task_relevance
+  × permission_filter
+</code></pre>
+<p>权限过滤必须在召回前或召回时完成，不能先把其他用户的内容取出，再指望 Prompt 要求模型忽略。</p>
+<h3 id="section-4-select多少信息进入-context">4. Select：多少信息进入 Context</h3>
+<p>召回 100 条不等于全部注入。Context Builder 要去重、排序、控制 Token，并标注来源。低置信度内容可以告诉模型“这是待核验线索”，不能伪装成事实。</p>
+<h3 id="section-5-forget什么时候删除或失效">5. Forget：什么时候删除或失效</h3>
+<p>遗忘是 Memory 系统的一等能力：</p>
+<ul>
+<li>用户要求删除；</li>
+<li>数据超过保存期限；</li>
+<li>新事实替代旧事实；</li>
+<li>来源被证明错误；</li>
+<li>项目或 Session 已关闭；</li>
+<li>权限关系发生变化。</li>
+</ul>
+<p>只会写不会忘的 Memory，最终会成为过时信息和隐私风险的集合。</p>
+<h2 id="section-一个典型错误模型把推测写成事实">一个典型错误：模型把推测写成事实</h2>
+<p>用户说：</p>
+<blockquote>
+<p>我最近在看 Go，也许以后会用。</p>
+</blockquote>
+<p>模型总结成：</p>
+<pre><code class="language-text">用户的主要编程语言是 Go。
+</code></pre>
+<p>下次检索时，这条推断以确定事实的形式进入 Context，Agent 开始默认生成 Go 代码。多轮以后，错误会被自身输出反复强化。</p>
+<p>解决方法不是让模型“更谨慎”一句话，而是改变数据结构：</p>
+<pre><code class="language-json">{
+  &quot;content&quot;: &quot;用户最近在了解 Go&quot;,
+  &quot;kind&quot;: &quot;interest&quot;,
+  &quot;source_quote&quot;: &quot;我最近在看 Go，也许以后会用&quot;,
+  &quot;inference&quot;: false,
+  &quot;confidence&quot;: 1.0
+}
+</code></pre>
+<p>若需要推断，应单独标记：</p>
+<pre><code class="language-json">{
+  &quot;content&quot;: &quot;用户未来可能采用 Go&quot;,
+  &quot;kind&quot;: &quot;hypothesis&quot;,
+  &quot;inference&quot;: true,
+  &quot;confidence&quot;: 0.45
+}
+</code></pre>
+<p>事实与推断不分，是长期 Memory 最危险的污染来源之一。</p>
+<h2 id="section-memory-如何被评测">Memory 如何被评测</h2>
+<p>不能只问“它记住了吗”，至少要分别评估：</p>
+<div class="table-scroll"><table>
+<thead>
+<tr>
+<th>阶段</th>
+<th>指标</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>写入</td>
+<td>该存的是否保存，不该存的是否拒绝</td>
+</tr>
+<tr>
+<td>更新</td>
+<td>新事实能否正确覆盖或并存</td>
+</tr>
+<tr>
+<td>召回</td>
+<td>相关事实是否进入候选，Recall@K</td>
+</tr>
+<tr>
+<td>精排</td>
+<td>过期、低可信内容是否被降权</td>
+</tr>
+<tr>
+<td>使用</td>
+<td>模型是否正确引用，而非曲解</td>
+</tr>
+<tr>
+<td>遗忘</td>
+<td>删除后是否从索引、缓存和备份路径失效</td>
+</tr>
+</tbody></table></div>
+<p>最终回答正确，并不能证明 Memory 正确。模型可能凭参数知识猜对；同样，召回正确也不保证回答正确，模型可能忽略了它。</p>
+<h2 id="section-所谓记忆是系统能力而非模型器官">所谓“记忆”，是系统能力而非模型器官</h2>
+<p>从用户体验看，Agent 确实表现得像“记得我”。从工程机制看，这种连续性来自一条外部管道：</p>
+<pre><code class="language-text">过去事件
+→ 选择与结构化
+→ 持久化
+→ 检索与权限过滤
+→ Context 注入
+→ 当前模型决策
+</code></pre>
+<p>因此问题“Agent 的 Memory 到底是不是记忆”有两个答案：</p>
+<ul>
+<li>在交互层，它可以提供类似记忆的连续体验；</li>
+<li>在实现层，它是外部存储、检索、压缩和上下文编排机制。</li>
+</ul>
+<p>理解第二个答案很重要。只有把 Memory 当成数据系统，才能讨论一致性、来源、过期、隐私、删除和评测；否则“记忆”只会成为一个拟人化词语，掩盖真正需要设计的工程细节。</p>
+
+    </article>
+  </main>
+
+  <footer class="site-footer article-footer">
+    <a href="../sections/agent.html">Agent 探索 / 核心机制</a>
+    <a href="https://github.com/yjd953/yjd953/blob/main/posts/agent-memory.md">View source ↗</a>
+  </footer>
+  <script src="../assets/site.js" defer></script>
+</body>
+</html>

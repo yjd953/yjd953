@@ -1,0 +1,321 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="从可执行文件到地址空间、文件描述符、栈、堆与 PID，解释程序为何不再只是文件。">
+  <meta name="theme-color" content="#f1f1ee">
+  <title>进程到底是什么？ — Dale Yang</title>
+  <link rel="stylesheet" href="../assets/site.css">
+</head>
+<body class="article-page">
+  <div class="reading-progress" id="readingProgress" aria-hidden="true"></div>
+
+  <header class="site-header">
+    <a class="wordmark" href="../" aria-label="Dale Yang home">DY<span>.</span></a>
+    <nav aria-label="Primary">
+      <a href="../sections/computer-systems.html">计算机底层</a>
+      <a href="https://github.com/yjd953">GitHub</a>
+    </nav>
+  </header>
+
+  <main class="article-layout">
+    <header class="article-masthead">
+      <a class="back-link" href="../sections/computer-systems.html">← 计算机底层</a>
+      <p class="kicker">02.05 / Process / ZH</p>
+      <h1>进程到底是什么？</h1>
+      <p class="article-deck">从可执行文件到地址空间、文件描述符、栈、堆与 PID，解释程序为何不再只是文件。</p>
+    </header>
+
+    <article class="prose">
+      <p>磁盘上有一个文件：</p>
+<pre><code class="language-text">/usr/local/bin/app
+</code></pre>
+<p>运行它以后，系统里出现 PID 1842。此时“程序”和“进程”已经不是同一件事。</p>
+<p>程序是持久化的代码与数据描述；进程是操作系统为一次运行建立的动态上下文。它不仅包含机器指令，还包含地址空间、线程、文件描述符、权限、信号、调度与内核记账。</p>
+<h2 id="section-program-是一份可执行描述">Program 是一份可执行描述</h2>
+<p>可执行文件通常保存：</p>
+<ul>
+<li>机器码；</li>
+<li>只读常量；</li>
+<li>已初始化全局数据；</li>
+<li>未初始化数据的大小；</li>
+<li>程序入口；</li>
+<li>动态库依赖；</li>
+<li>符号与重定位信息。</li>
+</ul>
+<p>文件躺在磁盘上时不会消耗 CPU，也没有 PID。它可以被复制、校验 Hash、反汇编，但不会主动推进状态。</p>
+<p>同一个文件可以启动多次：</p>
+<pre><code class="language-bash">./app &amp;
+./app &amp;
+./app &amp;
+</code></pre>
+<p>得到三个进程。它们可以共享同一份只读代码页，却拥有不同的运行状态。</p>
+<h2 id="section-process-是一次运行的身份">Process 是一次运行的身份</h2>
+<p>操作系统内核会为进程或任务维护控制结构。在 Linux 中，调度实体以 <code>task_struct</code> 等内核结构描述，并关联：</p>
+<ul>
+<li>PID 与线程组；</li>
+<li>调度状态和优先级；</li>
+<li>虚拟内存描述；</li>
+<li>打开的文件；</li>
+<li>当前工作目录；</li>
+<li>用户与权限凭证；</li>
+<li>信号处理状态；</li>
+<li>CPU 时间和资源限制；</li>
+<li>父子关系；</li>
+<li>Namespace、Cgroup 等隔离信息。</li>
+</ul>
+<p>进程不是内存中的某一块数据，而是这些资源和规则组合出来的抽象。</p>
+<h2 id="section-从文件到进程">从文件到进程</h2>
+<p>典型路径：</p>
+<pre><code class="language-text">可执行文件
+→ Shell 创建子进程
+→ execve 替换子进程映像
+→ 内核建立地址空间与初始线程
+→ Loader 映射代码和共享库
+→ Runtime 初始化
+→ main
+</code></pre>
+<p><code>execve</code> 成功后，可执行文件本身仍在磁盘上。进程的代码页通常以文件映射方式关联它，访问时按需装入 Page Cache 和物理内存。</p>
+<p>修改或删除路径，并不简单等于立刻抹掉正在运行的指令。Unix 文件语义允许已打开或已映射对象继续引用底层 Inode，直到最后一个引用释放。部署系统因此可以替换路径上的二进制，而旧进程继续运行旧映像。</p>
+<h2 id="section-address-space进程看到的内存世界">Address Space：进程看到的内存世界</h2>
+<p>每个普通进程拥有自己的虚拟地址空间视图：</p>
+<pre><code class="language-text">高地址
+┌─────────────────────┐
+│ Thread stacks       │
+├─────────────────────┤
+│ mmap regions        │  共享库、文件、匿名映射
+├─────────────────────┤
+│ Heap                │
+├─────────────────────┤
+│ BSS / Data          │
+├─────────────────────┤
+│ Text / Read-only    │
+└─────────────────────┘
+低地址
+</code></pre>
+<p>两个进程都可以访问虚拟地址 <code>0x400000</code>，却映射到不同物理页。页表由内核管理，CPU 的 MMU 完成地址转换。</p>
+<p>这种隔离带来：</p>
+<ul>
+<li>一个进程通常不能随意读取另一个进程内存；</li>
+<li>每个进程可以拥有看似连续的地址；</li>
+<li>相同物理页可以映射进多个进程；</li>
+<li>页面可以尚未驻留、来自文件或被换出；</li>
+<li>权限可按页设置为读、写、执行。</li>
+</ul>
+<p>地址空间是进程最核心的边界之一，但不是唯一边界。</p>
+<h2 id="section-textdataheap-和-stack-的关系">Text、Data、Heap 和 Stack 的关系</h2>
+<h3 id="section-text">Text</h3>
+<p>保存可执行机器码，通常只读且可执行。多个运行同一程序的进程可以共享相同物理代码页，因为它们不应修改代码。</p>
+<h3 id="section-data-与-bss">Data 与 BSS</h3>
+<p>Data 对应已初始化全局变量，BSS 表示启动时应为零的区域。BSS 不必在可执行文件中存一大段零，只需记录大小。</p>
+<p>每个进程通常拥有自己的可写副本。<code>fork</code> 后起初可通过 Copy-on-Write 共享，发生写入时再复制。</p>
+<h3 id="section-heap">Heap</h3>
+<p>Heap 是动态分配器管理的进程地址空间区域。<code>malloc</code> 或 Go Runtime 从中或从独立 <code>mmap</code> 区域分配对象。</p>
+<p>Heap 不等于所有空闲虚拟内存，也不等于已经占用的物理 RAM。</p>
+<h3 id="section-stack">Stack</h3>
+<p>每个线程有自己的用户栈，保存：</p>
+<ul>
+<li>返回地址；</li>
+<li>Spill 的局部值；</li>
+<li>部分函数参数；</li>
+<li>调用帧与临时空间。</li>
+</ul>
+<p>所以说“进程有一个栈”只是单线程简化。多线程进程有共享地址空间，但每个线程需要独立栈和寄存器上下文。</p>
+<h2 id="section-file-descriptor进程如何引用内核对象">File Descriptor：进程如何引用内核对象</h2>
+<p>用户程序调用：</p>
+<pre><code class="language-c">int fd = open(&quot;data.txt&quot;, O_RDONLY);
+</code></pre>
+<p>返回的 <code>fd</code> 只是当前进程文件描述符表中的小整数索引：</p>
+<pre><code class="language-text">Process FD Table
+0 → stdin
+1 → stdout
+2 → stderr
+3 → open file description → inode / socket / pipe
+</code></pre>
+<p>描述符 3 在另一个进程中可以指向完全不同对象。</p>
+<p><code>fork</code> 后父子进程的 FD Table 项通常引用同一 Open File Description，因此可能共享文件偏移。<code>dup2</code> 可以让两个描述符指向同一对象，Shell 用它实现管道与重定向。</p>
+<p>“文件描述符”也不只对应磁盘文件，它还可以代表：</p>
+<ul>
+<li>Socket；</li>
+<li>Pipe；</li>
+<li>Eventfd；</li>
+<li>Epoll 实例；</li>
+<li>设备；</li>
+<li>匿名内存对象。</li>
+</ul>
+<p>进程通过这些受内核管理的 Handle 与外部世界交互。</p>
+<h2 id="section-pid-是标识不是进程本身">PID 是标识，不是进程本身</h2>
+<p>PID 是某个 PID Namespace 中的数字标识。它用于查找和管理任务，但：</p>
+<ul>
+<li>进程退出后 PID 可以被复用；</li>
+<li>容器内外看到的 PID 可能不同；</li>
+<li>多线程在 Linux 中有线程 ID 与线程组 ID 的区别；</li>
+<li>PID 不承载进程状态，只是索引入口。</li>
+</ul>
+<p>把长期业务身份只绑定 PID 会产生竞态。进程管理器通常还结合启动时间、Pidfd 或内部实例 ID，防止误操作后来复用同一 PID 的进程。</p>
+<h2 id="section-进程与线程如何组合">进程与线程如何组合</h2>
+<p>一个进程至少有一个线程。线程是被 Scheduler 实际调度的执行流。</p>
+<p>同一进程中的线程通常共享：</p>
+<ul>
+<li>虚拟地址空间；</li>
+<li>代码和全局数据；</li>
+<li>Heap；</li>
+<li>文件描述符表；</li>
+<li>当前工作目录；</li>
+<li>大部分权限状态。</li>
+</ul>
+<p>每个线程独有：</p>
+<ul>
+<li>指令指针；</li>
+<li>通用寄存器；</li>
+<li>Stack；</li>
+<li>调度状态；</li>
+<li>线程局部存储；</li>
+<li>部分信号状态。</li>
+</ul>
+<p>所以进程更像资源与隔离容器，线程更像在其中推进指令的执行实体。</p>
+<h2 id="section-process-state-不只是运行或停止">Process State 不只是“运行或停止”</h2>
+<p>从调度角度，一个任务可能处于：</p>
+<pre><code class="language-text">Running / Runnable
+Sleeping
+Uninterruptible wait
+Stopped
+Zombie
+</code></pre>
+<p>Runnable 表示可以运行但正等待 CPU；Running 表示当前占用某个 Core；Sleeping 可能在等待网络、磁盘或定时器。</p>
+<p>Zombie 并不是还在执行。它已经退出并释放大部分资源，只保留退出状态等少量信息，等待父进程通过 <code>wait</code> 回收。</p>
+<p>这解释了为什么进程数量不等于同时占用 CPU 的数量。</p>
+<h2 id="section-一次系统调用如何跨越进程边界">一次系统调用如何跨越进程边界</h2>
+<p>用户进程执行：</p>
+<pre><code class="language-c">read(fd, buffer, 4096);
+</code></pre>
+<p>它通过系统调用进入内核态。内核根据当前进程的 FD Table 找到对象，检查权限，执行文件或 Socket 读取。</p>
+<p>如果数据尚未准备：</p>
+<ol>
+<li>当前线程进入等待状态；</li>
+<li>Scheduler 选择其他线程运行；</li>
+<li>I/O 完成后设备中断或内核事件唤醒线程；</li>
+<li>线程重新变为 Runnable；</li>
+<li>某次调度后继续从系统调用返回处执行。</li>
+</ol>
+<p>进程的连续体验，是内核保存和恢复执行上下文的结果，并不表示它一直占据 CPU。</p>
+<h2 id="section-fork-为什么能快速复制进程"><code>fork</code> 为什么能快速复制进程</h2>
+<p>朴素做法需要复制整个地址空间，成本很高。现代系统通常使用 Copy-on-Write：</p>
+<pre><code class="language-text">fork 前：
+Parent page table → Physical Page A
+
+fork 后：
+Parent page table ─┐
+                   ├→ Physical Page A（只读/COW）
+Child page table ──┘
+
+Child 写入后：
+Parent → Page A
+Child  → copied Page B
+</code></pre>
+<p>页表和内核元数据仍有成本，但大部分物理页只在真正写入时复制。紧接着 <code>execve</code> 的子进程会抛弃旧地址空间，因此避免无意义的大量复制。</p>
+<h2 id="section-process-isolation-不是绝对封闭">Process Isolation 不是绝对封闭</h2>
+<p>进程可以显式共享：</p>
+<ul>
+<li>共享内存；</li>
+<li>Memory-mapped File；</li>
+<li>Pipe 与 Socket；</li>
+<li>继承的文件描述符；</li>
+<li>信号；</li>
+<li><code>ptrace</code> 等调试接口。</li>
+</ul>
+<p>权限和 Namespace 决定这些通道是否可用。容器也不是“另一台机器”，通常仍是宿主机内核中的进程，只是被 Namespace、Cgroup、Capabilities 和文件系统视图隔离。</p>
+<h2 id="section-为什么运行起来后不再只是那个文件">为什么运行起来后不再只是那个文件</h2>
+<p>可以把差异列出来：</p>
+<div class="table-scroll"><table>
+<thead>
+<tr>
+<th>可执行文件</th>
+<th>进程</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>磁盘上的字节</td>
+<td>内核中的活动执行实体</td>
+</tr>
+<tr>
+<td>没有 PID</td>
+<td>有运行身份与生命周期</td>
+</tr>
+<tr>
+<td>描述代码和静态数据</td>
+<td>包含寄存器、线程和动态状态</td>
+</tr>
+<tr>
+<td>不拥有地址空间</td>
+<td>拥有虚拟地址空间</td>
+</tr>
+<tr>
+<td>不持有打开的 Socket</td>
+<td>拥有文件描述符表</td>
+</tr>
+<tr>
+<td>不被 Scheduler 调度</td>
+<td>线程被 Scheduler 调度</td>
+</tr>
+<tr>
+<td>可被多次启动</td>
+<td>每次启动形成独立实例</td>
+</tr>
+</tbody></table></div>
+<p>进程执行过程中还会不断偏离原始文件：</p>
+<ul>
+<li>Heap 新增对象；</li>
+<li>Stack 形成调用链；</li>
+<li>动态库被映射；</li>
+<li>配置与网络数据进入内存；</li>
+<li>文件描述符连接外部资源；</li>
+<li>寄存器保存当前计算状态；</li>
+<li>代码甚至可能通过 JIT 动态生成。</li>
+</ul>
+<p>磁盘文件只提供启动映像的一部分。</p>
+<h2 id="section-用-proc-观察一个真实进程">用 <code>/proc</code> 观察一个真实进程</h2>
+<p>启动：</p>
+<pre><code class="language-bash">./app &amp;
+pid=$!
+</code></pre>
+<p>观察：</p>
+<pre><code class="language-bash">cat /proc/$pid/status
+cat /proc/$pid/maps
+ls -l /proc/$pid/fd
+cat /proc/$pid/cmdline | tr &#39;\0&#39; &#39; &#39;
+cat /proc/$pid/environ | tr &#39;\0&#39; &#39;\n&#39;
+ls /proc/$pid/task
+</code></pre>
+<p>这些入口分别展示：</p>
+<ul>
+<li>身份、状态和内存统计；</li>
+<li>虚拟内存映射；</li>
+<li>文件描述符；</li>
+<li>启动参数；</li>
+<li>环境变量；</li>
+<li>线程列表。</li>
+</ul>
+<p>注意 <code>/proc</code> 受权限控制，命令行为也会因进程生命周期和 Linux 配置不同而变化。</p>
+<h2 id="section-进程是一组由内核维护的承诺">进程是一组由内核维护的承诺</h2>
+<p>进程的本质不是“加载到内存里的程序”，而是操作系统提供的一组执行语义：</p>
+<pre><code class="language-text">独立的虚拟地址视图
++ 一组可调度线程
++ 对内核对象的引用
++ 身份、权限和资源记账
++ 信号、生命周期与父子关系
+</code></pre>
+<p>可执行文件回答“有哪些代码和初始数据”；进程回答“这一次运行现在是谁、看到什么、执行到哪、拥有哪些资源”。</p>
+<p>当程序真正运行起来后，文件只是它的来源之一。进程已经成为一个随时间变化、由内核持续维护的系统对象。</p>
+
+    </article>
+  </main>
+
+  <footer class="site-footer article-footer">
+    <a href="../sections/computer-systems.html">计算机底层 / 进程、线程与内存</a>
+    <a href="https://github.com/yjd953/yjd953/blob/main/posts/process-explained.md">View source ↗</a>
+  </footer>
+  <script src="../assets/site.js" defer></script>
+</body>
+</html>

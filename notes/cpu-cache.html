@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="从 CPU 与内存的速度差出发，建立 Register、Cache、RAM、SSD 到网络的延迟层次。">
+  <meta name="theme-color" content="#f1f1ee">
+  <title>CPU 为什么需要 Cache？ — Dale Yang</title>
+  <link rel="stylesheet" href="../assets/site.css">
+</head>
+<body class="article-page">
+  <div class="reading-progress" id="readingProgress" aria-hidden="true"></div>
+
+  <header class="site-header">
+    <a class="wordmark" href="../" aria-label="Dale Yang home">DY<span>.</span></a>
+    <nav aria-label="Primary">
+      <a href="../sections/computer-systems.html">计算机底层</a>
+      <a href="https://github.com/yjd953">GitHub</a>
+    </nav>
+  </header>
+
+  <main class="article-layout">
+    <header class="article-masthead">
+      <a class="back-link" href="../sections/computer-systems.html">← 计算机底层</a>
+      <p class="kicker">02.08 / Memory hierarchy / ZH</p>
+      <h1>CPU 为什么需要 Cache？</h1>
+      <p class="article-deck">从 CPU 与内存的速度差出发，建立 Register、Cache、RAM、SSD 到网络的延迟层次。</p>
+    </header>
+
+    <article class="prose">
+      <p>CPU 的加法器可能一个周期就完成运算，但所需数据如果在 DRAM，核心可能等待数百个周期。</p>
+<p>Cache 的根本原因不是“内存容量不够”，而是：</p>
+<blockquote>
+<p>计算单元变快的速度远高于远端存储提供单次数据的速度，物理距离、信号传播和存储结构造成了不可消除的延迟层次。</p>
+</blockquote>
+<h2 id="section-先建立距离概念">先建立“距离”概念</h2>
+<p>程序中的所有数据并不与 CPU 等距离。</p>
+<p>粗略数量级如下，具体值随处理器、频率、拓扑和负载变化：</p>
+<pre><code class="language-text">Register                 ~ 1 个周期量级
+L1 Cache                 ~ 数个周期
+L2 Cache                 ~ 十余周期
+L3 / Last-Level Cache    ~ 数十周期
+Local DRAM               ~ 数十到上百纳秒
+NVMe SSD                 ~ 数十到数百微秒
+跨机房 Network           ~ 毫秒及以上
+</code></pre>
+<p>假设 CPU 为 3GHz，一个周期约 0.33ns。100ns 的 DRAM 延迟接近 300 个周期。如果流水线没有别的工作可做，这段时间足够执行大量简单算术指令。</p>
+<p>SSD 比 DRAM 再慢约三个数量级，网络又受到传播、排队和协议栈影响。</p>
+<p>现代计算机不是一个统一速度的“存储器”，而是一组容量越大、越便宜、越远、越慢的层次。</p>
+<h2 id="section-为什么不能把所有内存都做成寄存器">为什么不能把所有内存都做成寄存器</h2>
+<p>寄存器最快，但数量很少，原因包括：</p>
+<ul>
+<li>需要位于执行核心附近；</li>
+<li>更多寄存器让指令编码更复杂；</li>
+<li>多端口寄存器文件面积和功耗很高；</li>
+<li>大结构的信号传播延迟会增加；</li>
+<li>上下文切换需要保存架构寄存器。</li>
+</ul>
+<p>SRAM Cache 比 DRAM 快，但单位面积更大、更耗电。DRAM 密度高，适合几十或几百 GiB 容量，却需要行激活、刷新和片外访问。</p>
+<p>因此硬件只能分层：</p>
+<pre><code class="language-text">越靠近 CPU：小、快、贵
+越远离 CPU：大、慢、便宜
+</code></pre>
+<p>Cache 试图让“最近可能使用的数据”暂时待在更近的位置。</p>
+<h2 id="section-cache-为什么按-line-搬运">Cache 为什么按 Line 搬运</h2>
+<p>CPU 请求地址 <code>0x1003</code> 的一个字节时，Cache 通常不会只取一个字节，而是取整条 Cache Line。现代桌面和服务器 CPU 常见 Line 大小为 64 字节，但应以实际硬件为准。</p>
+<p>如果 Line 为 64 字节：</p>
+<pre><code class="language-text">访问 0x1003
+→ 拉取 0x1000..0x103f
+</code></pre>
+<p>这是利用 Spatial Locality：程序访问一个地址后，很可能很快访问相邻地址。</p>
+<p>数组遍历：</p>
+<pre><code class="language-c">for (size_t i = 0; i &lt; n; i++) {
+    sum += values[i];
+}
+</code></pre>
+<p>一次 Cache Miss 带回多个连续元素，后续访问可以命中。</p>
+<p>链表遍历：</p>
+<pre><code class="language-c">for (Node *p = head; p != NULL; p = p-&gt;next) {
+    sum += p-&gt;value;
+}
+</code></pre>
+<p>节点若散布在 Heap，各次访问可能落在不同 Line，硬件也难提前知道 <code>next</code>。相同算法复杂度下，数组常明显更快。</p>
+<h2 id="section-temporal-locality刚用过的可能还会用">Temporal Locality：刚用过的可能还会用</h2>
+<p>循环：</p>
+<pre><code class="language-c">for (...) {
+    total += config.factor * input[i];
+}
+</code></pre>
+<p><code>config.factor</code> 被反复读取。第一次进入 Cache 后，后续访问可能持续命中。</p>
+<p>局部变量也不一定都在寄存器中。若发生 Spill，它们可能位于 Stack，但 Stack 的热区域通常具有很强时间局部性，容易驻留在 L1。</p>
+<p>Cache 有效的前提不是程序员显式调用它，而是程序访问模式呈现时间与空间局部性。</p>
+<h2 id="section-l1l2l3-分别在解决什么">L1、L2、L3 分别在解决什么</h2>
+<h3 id="section-l1">L1</h3>
+<p>离执行单元最近，容量最小，延迟最低。常分为 Instruction Cache 和 Data Cache，避免取指与数据访问互相争用。</p>
+<h3 id="section-l2">L2</h3>
+<p>更大、更慢，通常仍为 Core 私有或局部共享。接住 L1 容纳不了的工作集。</p>
+<h3 id="section-last-level-cache">Last-Level Cache</h3>
+<p>通常容量更大，可能由多个 Core 共享，并按 Slice 分布。它既降低访问 DRAM 的概率，也参与多核数据共享和一致性。</p>
+<p>层数本身不是目的。每一层都在做容量、延迟、带宽、面积和功耗的折中。</p>
+<h2 id="section-cache-如何知道一块数据在哪里">Cache 如何知道一块数据在哪里</h2>
+<p>物理地址可概念性拆成：</p>
+<pre><code class="language-text">Tag | Set Index | Block Offset
+</code></pre>
+<ul>
+<li>Offset 选择 Cache Line 内的字节；</li>
+<li>Index 选择某个 Set；</li>
+<li>Tag 判断该 Set 中哪一条对应目标地址。</li>
+</ul>
+<p>如果每个地址只能放一个位置，叫 Direct-mapped，查找简单但冲突多。现代 Cache 常采用 Set-associative：一个 Set 有多个 Way。</p>
+<p>例如两个热点数组的地址总映射到同一 Set，即使总工作集不大，也可能互相驱逐，产生 Conflict Miss。</p>
+<p>Cache Miss 不只有“数据太大”一种：</p>
+<ul>
+<li>Compulsory Miss：首次访问；</li>
+<li>Capacity Miss：工作集超过容量；</li>
+<li>Conflict Miss：映射冲突；</li>
+<li>Coherence Miss：其他 Core 的写入使本地副本失效。</li>
+</ul>
+<h2 id="section-cache-hit-与-miss-如何改变流水线">Cache Hit 与 Miss 如何改变流水线</h2>
+<p>指令：</p>
+<pre><code class="language-asm">MOV RAX, [RBX]
+ADD RCX, RAX
+</code></pre>
+<p>第二条依赖 Load 结果。若 L1 命中，等待很短；若访问 DRAM，依赖链可能停顿数百周期。</p>
+<p>乱序执行可以先做其他无关指令，Memory-Level Parallelism 也能同时发出多个 Load，但如果后续所有工作都依赖这一个值，延迟无法隐藏。</p>
+<p>这就是 Pointer Chasing 慢的原因：</p>
+<pre><code class="language-text">读取 node.next
+→ 才知道下一个地址
+→ 再读取
+</code></pre>
+<p>下一次地址依赖上一次结果，无法提前并行。</p>
+<h2 id="section-prefetch在使用前把数据拉近">Prefetch：在使用前把数据拉近</h2>
+<p>硬件预取器识别顺序或固定步长访问：</p>
+<pre><code class="language-text">读取 A[0], A[1], A[2]
+→ 推测接下来需要 A[3], A[4]
+</code></pre>
+<p>软件也可通过编译器指令或访问重排帮助预取。</p>
+<p>预取不总是有益：</p>
+<ul>
+<li>猜错会浪费带宽；</li>
+<li>无用 Line 会挤出热点数据；</li>
+<li>随机访问难预测；</li>
+<li>过早预取可能在使用前被驱逐；</li>
+<li>过晚则隐藏不了延迟。</li>
+</ul>
+<p>高性能程序往往不是减少所有内存访问，而是让访问更连续、更可预测、更能并行。</p>
+<h2 id="section-cache-与虚拟内存之间还有-tlb">Cache 与虚拟内存之间还有 TLB</h2>
+<p>CPU 发出的 Load 使用虚拟地址，访问 Cache 前后还涉及地址翻译。TLB 缓存虚拟页到物理页映射。</p>
+<pre><code class="language-text">Virtual Address
+→ TLB hit：快速得到 Physical Address
+→ TLB miss：Page Table Walk
+→ Cache hierarchy
+</code></pre>
+<p>工作集跨越大量页面时，即使数据 Cache 行为尚可，也可能产生 TLB Miss。Huge Page 通过更大页覆盖更多地址范围，可能降低 TLB 压力，但也有内存碎片和管理成本。</p>
+<p>所以“内存局部性”同时包括 Cache Line 局部性与 Page 局部性。</p>
+<h2 id="section-多核-cache-为什么需要一致性">多核 Cache 为什么需要一致性</h2>
+<p>假设两个 Core 都缓存了变量 <code>x</code>：</p>
+<pre><code class="language-text">Core 0 L1: x = 1
+Core 1 L1: x = 1
+</code></pre>
+<p>Core 0 写 <code>x = 2</code> 后，Core 1 不能永远读到旧值。Cache Coherence Protocol 追踪 Cache Line 状态，使写者获得所有权，并让其他副本失效或更新。</p>
+<p>这并不自动解决并发正确性。Coherence 保证硬件层的 Line 一致性，语言内存模型仍要求用锁或原子操作建立 Happens-before。</p>
+<h2 id="section-false-sharing没有共享变量也可能争用">False Sharing：没有共享变量也可能争用</h2>
+<pre><code class="language-c">struct Counters {
+    long a;  // Thread 0 频繁写
+    long b;  // Thread 1 频繁写
+};
+</code></pre>
+<p><code>a</code> 和 <code>b</code> 不同，却可能位于同一 64 字节 Cache Line。两个 Core 写各自变量时，整条 Line 的所有权来回转移。</p>
+<p>这叫 False Sharing。逻辑上没有数据竞争，性能上却发生一致性争用。</p>
+<p>可通过：</p>
+<ul>
+<li>按 Cache Line Padding；</li>
+<li>每线程局部计数，最后汇总；</li>
+<li>减少共享写入；</li>
+<li>合理布局数据；</li>
+</ul>
+<p>缓解。但 Padding 会增加内存占用，应先测量。</p>
+<h2 id="section-从-cache-到-ssd-与-network">从 Cache 到 SSD 与 Network</h2>
+<p>Cache 的思维可以扩展到整个系统：</p>
+<pre><code class="language-text">CPU Register
+→ CPU Cache
+→ RAM
+→ Local SSD
+→ Remote Storage
+→ Cross-region Service
+</code></pre>
+<p>更远的一层通常：</p>
+<ul>
+<li>延迟更高；</li>
+<li>容量更大；</li>
+<li>单位成本更低；</li>
+<li>故障模式更多；</li>
+<li>需要批量与异步隐藏延迟。</li>
+</ul>
+<p>数据库 Buffer Pool 是磁盘页的内存 Cache；操作系统 Page Cache 是文件块的内存 Cache；CDN 是源站内容的地理 Cache。</p>
+<p>它们面对同一个问题：计算或用户离原始数据太远。</p>
+<h2 id="section-用两个实验看到局部性">用两个实验看到局部性</h2>
+<h3 id="section-顺序访问与随机访问">顺序访问与随机访问</h3>
+<p>准备一个远大于 Last-Level Cache 的数组，分别：</p>
+<pre><code class="language-text">顺序读取每个元素
+随机排列索引后读取
+</code></pre>
+<p>顺序访问能利用 Cache Line、Prefetch 和 DRAM Burst；随机访问更容易等待每次独立 Load。</p>
+<h3 id="section-改变工作集">改变工作集</h3>
+<p>从 4KiB、32KiB、256KiB、数 MiB、数百 MiB 逐步增加数组大小，重复访问并测量每次访问时间。</p>
+<p>当工作集越过 L1、L2、L3 容量附近时，曲线可能出现台阶。实际边界会被关联度、共享 Cache、预取和测量噪声模糊。</p>
+<p>Linux 可结合：</p>
+<pre><code class="language-bash">perf stat -e cycles,instructions,cache-references,cache-misses ./bench
+</code></pre>
+<p>更精确的 L1/L2/LLC 事件名称依 CPU 型号而异，应通过 <code>perf list</code> 查询。</p>
+<h2 id="section-latency-与-bandwidth-不是一回事">Latency 与 Bandwidth 不是一回事</h2>
+<p>内存系统可能拥有很高带宽，却仍有较高单次访问延迟。</p>
+<ul>
+<li>顺序扫描可同时发出许多请求，接近带宽上限；</li>
+<li>Pointer Chasing 每一步依赖上一步，主要受延迟限制；</li>
+<li>多核一起扫描可能耗尽共享带宽；</li>
+<li>单线程随机读取即使数据量不大，也可能因延迟很慢。</li>
+</ul>
+<p>性能分析需要先判断工作负载是 Latency-bound 还是 Bandwidth-bound。</p>
+<h2 id="section-cache-为什么必不可少">Cache 为什么必不可少</h2>
+<p>如果没有 Cache，每次取指、读取 Stack、访问数组都必须等待 DRAM。快速执行单元会大部分时间闲置。</p>
+<p>Cache 利用程序局部性，把最近和相邻数据搬到更靠近 CPU 的 SRAM，使大多数访问呈现“像快速小内存”，只有 Miss 才支付远端代价。</p>
+<p>它无法消除距离，只能让常见路径绕开距离。</p>
+<p>理解 Cache 后，许多性能现象会连成一条线：</p>
+<pre><code class="language-text">数据布局影响 Cache Line
+工作集大小影响命中层级
+线程迁移影响局部性
+共享写入触发 Coherence
+随机依赖限制 Prefetch
+远端访问让 CPU 等待
+</code></pre>
+<p>CPU 为什么需要 Cache，最终不是一个 L1/L2/L3 名词题，而是整个计算机系统都必须面对的物理事实：数据移动需要时间，而计算速度常常比数据抵达速度快得多。</p>
+
+    </article>
+  </main>
+
+  <footer class="site-footer article-footer">
+    <a href="../sections/computer-systems.html">计算机底层 / 进程、线程与内存</a>
+    <a href="https://github.com/yjd953/yjd953/blob/main/posts/cpu-cache.md">View source ↗</a>
+  </footer>
+  <script src="../assets/site.js" defer></script>
+</body>
+</html>

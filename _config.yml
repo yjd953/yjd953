@@ -1,0 +1,4 @@
+theme: jekyll-theme-minimal
+title: Dale Yang — Engineering Notes
+description: Notes on agents, LLM systems, tool use, evaluation, and reliable AI engineering.
+show_downloads: false

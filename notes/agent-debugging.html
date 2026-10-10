@@ -1,0 +1,276 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="面对非确定性决策链，把调试重心从静态代码迁移到可复现的执行轨迹。">
+  <meta name="theme-color" content="#f1f1ee">
+  <title>Agent 最难 Debug 的地方，为什么不是代码？ — Dale Yang</title>
+  <link rel="stylesheet" href="../assets/site.css">
+</head>
+<body class="article-page">
+  <div class="reading-progress" id="readingProgress" aria-hidden="true"></div>
+
+  <header class="site-header">
+    <a class="wordmark" href="../" aria-label="Dale Yang home">DY<span>.</span></a>
+    <nav aria-label="Primary">
+      <a href="../sections/agent.html">Agent 探索</a>
+      <a href="https://github.com/yjd953">GitHub</a>
+    </nav>
+  </header>
+
+  <main class="article-layout">
+    <header class="article-masthead">
+      <a class="back-link" href="../sections/agent.html">← Agent 探索</a>
+      <p class="kicker">01.13 / Debugging / ZH</p>
+      <h1>Agent 最难 Debug 的地方，为什么不是代码？</h1>
+      <p class="article-deck">面对非确定性决策链，把调试重心从静态代码迁移到可复现的执行轨迹。</p>
+    </header>
+
+    <article class="prose">
+      <p>传统程序的心智模型通常是：</p>
+<pre><code class="language-text">Input → Code → Output
+</code></pre>
+<p>输出错误时，我们用相同输入重跑，沿调用栈检查分支、变量和副作用。只要代码与环境不变，路径通常可重复。</p>
+<p>Agent 的路径更像：</p>
+<pre><code class="language-text">Input
+→ Context
+→ Model Decision
+→ Tool
+→ Observation
+→ Context
+→ Model Decision
+→ ...
+→ Output
+</code></pre>
+<p>代码仍然重要，但真正决定行为的还包括模型版本、Prompt、工具描述、检索结果、历史消息和每轮环境反馈。Bug 可能不在任何一行传统业务代码里。</p>
+<h2 id="section-一个代码都正确的错误">一个“代码都正确”的错误</h2>
+<p>用户要求：</p>
+<blockquote>
+<p>找出订单延迟原因，不要执行任何修改。</p>
+</blockquote>
+<p>Agent 先调用 <code>get_order</code>，然后错误地调用 <code>cancel_order</code>。检查代码发现：</p>
+<ul>
+<li><code>get_order</code> 正确；</li>
+<li><code>cancel_order</code> 正确；</li>
+<li>Registry 映射正确；</li>
+<li>权限校验按配置允许；</li>
+<li>HTTP 请求与响应都正常。</li>
+</ul>
+<p>每个函数都“工作正常”，系统行为却错了。根因可能是：</p>
+<ol>
+<li>Prompt 中“解决用户问题”被模型理解成主动处理；</li>
+<li><code>cancel_order</code> 描述没有强调副作用；</li>
+<li>历史示例总是以取消订单结束；</li>
+<li>Context 中遗漏了“不要修改”；</li>
+<li>模型在这一轮做了错误选择；</li>
+<li>Runtime 没有为写操作设置确认门槛。</li>
+</ol>
+<p>这类问题不能只靠断点进入 <code>cancel_order</code> 解决。函数被正确执行，错误发生在它为什么被选择，以及为何被允许执行。</p>
+<h2 id="section-非确定性改变了复现方式">非确定性改变了复现方式</h2>
+<p>同一个输入运行十次，可能得到：</p>
+<pre><code class="language-text">6 次：只查询并解释
+3 次：查询后继续查物流
+1 次：错误取消订单
+</code></pre>
+<p>如果只重跑一次，问题可能“消失”。这不代表修复成功。</p>
+<p>Agent 复现需要固定尽可能多的变量：</p>
+<ul>
+<li>模型与版本；</li>
+<li>Temperature、Top P 等采样参数；</li>
+<li>System Prompt 版本；</li>
+<li>可见 Tool 集合及 Schema 版本；</li>
+<li>完整消息与 Context 排序；</li>
+<li>Memory / RAG 召回结果；</li>
+<li>Tool Observation；</li>
+<li>Runtime 和策略版本。</li>
+</ul>
+<p>即便全部固定，远程模型也未必位级确定。因此 Debug 单位要从“一次复现”升级为“一个 Case 的重复分布”。</p>
+<pre><code class="language-text">错误率：7 / 100
+修复后：1 / 100
+置信区间：...
+</code></pre>
+<p>概率系统需要统计证据，而不是一次成功截图。</p>
+<h2 id="section-prompt-bug-不是普通字符串-bug">Prompt Bug 不是普通字符串 Bug</h2>
+<p>Prompt 由多层拼装：</p>
+<pre><code class="language-text">基础 System Prompt
++ 产品策略
++ 当前 Skill
++ Tool Description
++ 对话历史
++ Memory
++ 检索文档
++ Tool Result
+</code></pre>
+<p>开发者查看模板文件时，往往看不到线上模型实际收到的最终 Context。一个下游模块可能：</p>
+<ul>
+<li>截断了末尾用户约束；</li>
+<li>把低可信检索片段放在更显眼位置；</li>
+<li>重复注入旧规则；</li>
+<li>使用了缓存中的旧 Prompt；</li>
+<li>在转义过程中破坏 JSON 示例。</li>
+</ul>
+<p>所以调 Prompt 的第一原则是保存 Context Manifest 和最终渲染结果。没有实际输入，讨论“模型为什么这样理解”只是猜测。</p>
+<h2 id="section-context-bug-具有时间性">Context Bug 具有时间性</h2>
+<p>传统参数通常在调用时确定。Agent Context 则会随每轮变化。</p>
+<p>例如第 1 轮工具返回：</p>
+<pre><code class="language-text">订单状态：pending
+</code></pre>
+<p>第 2 轮 Retry 返回：</p>
+<pre><code class="language-text">订单状态：shipped
+</code></pre>
+<p>如果 Context 同时保留两条，却没有时间戳和权威覆盖规则，模型可能继续使用旧状态。代码没有异常，数据也都真实，问题是两个不同时间的事实被当成同时有效。</p>
+<p>Context Debug 要回答：</p>
+<ul>
+<li>每段内容来自哪里；</li>
+<li>何时产生；</li>
+<li>为什么被选中；</li>
+<li>是否被截断；</li>
+<li>是否存在更新版本；</li>
+<li>模型在出错决策前实际看到了哪一版。</li>
+</ul>
+<h2 id="section-tool-selection-bug-是多变量相互作用">Tool Selection Bug 是多变量相互作用</h2>
+<p>模型选择哪个 Tool，受到以下共同影响：</p>
+<pre><code class="language-text">用户措辞
+× Tool 名称
+× Tool Description
+× 参数复杂度
+× 候选数量
+× 历史调用
+× 模型版本
+</code></pre>
+<p>例如 <code>search</code>、<code>search_web</code>、<code>search_docs</code>、<code>semantic_search</code> 同时可见时，即使每个工具单独描述合理，放在一起也可能边界重叠。</p>
+<p>这类问题适合做消融实验：</p>
+<ol>
+<li>只提供期望工具，确认模型能否正确构造参数；</li>
+<li>逐个加入竞争工具，观察错误率；</li>
+<li>固定 Prompt，只改 Description；</li>
+<li>固定工具，只移除历史 Context；</li>
+<li>比较模型版本。</li>
+</ol>
+<p>消融能够识别哪个变量改变了行为，而不是一次把 Prompt、模型和工具全部改掉，最后不知道修复来自哪里。</p>
+<h2 id="section-observation-bug-会伪装成模型-bug">Observation Bug 会伪装成模型 Bug</h2>
+<p>工具返回：</p>
+<pre><code class="language-json">{
+  &quot;status&quot;: 200,
+  &quot;data&quot;: [],
+  &quot;next_page&quot;: &quot;cursor_2&quot;
+}
+</code></pre>
+<p>Runtime 却压缩成：</p>
+<pre><code class="language-text">查询成功，没有结果。
+</code></pre>
+<p>模型据此断言“系统中不存在该订单”。其实第一页为空，后面还有分页。模型的推理基于错误 Observation，但根因在 Result Adapter。</p>
+<p>常见 Observation 问题包括：</p>
+<ul>
+<li>丢失分页和截断标记；</li>
+<li>把“请求成功”误写成“业务完成”；</li>
+<li>错误被吞掉，返回空列表；</li>
+<li>多个并行结果按错误 <code>call_id</code> 关联；</li>
+<li>日志裁剪删除根因；</li>
+<li>时间、单位或字符编码转换错误。</li>
+</ul>
+<p>因此调试不能只看模型输入的自然语言摘要，还要回到工具原始响应与转换过程。</p>
+<h2 id="section-从查代码转向查执行轨迹">从“查代码”转向“查执行轨迹”</h2>
+<p>一条可调试轨迹至少包含：</p>
+<pre><code class="language-text">Run
+  用户目标与约束
+  实际 Context 清单
+  模型和 Prompt 版本
+  每次 LLM 输入 / 结构化输出
+  每次 Tool Call 原始参数
+  Runtime 校验与授权结果
+  工具版本、Retry、Timeout
+  原始结果与 Observation
+  State 变化
+  停止原因与最终核验证据
+</code></pre>
+<p>调试顺序可以从结果倒推：</p>
+<h3 id="section-1-错误是什么">1. 错误是什么</h3>
+<p>先定义可验证预期。例如“禁止写操作”，不是模糊的“回答不够好”。</p>
+<h3 id="section-2-第一处偏离在哪里">2. 第一处偏离在哪里</h3>
+<p>最终答案错，不代表最后一次模型调用才错。沿 Trace 向前找到第一个不符合预期的节点。</p>
+<h3 id="section-3-偏离属于哪一层">3. 偏离属于哪一层</h3>
+<pre><code class="language-text">Goal parsing
+Context construction
+Model decision
+Tool routing
+Tool execution
+Observation transformation
+State transition
+Termination
+</code></pre>
+<h3 id="section-4-做最小变量实验">4. 做最小变量实验</h3>
+<p>只改变一项，重复运行。若同时升级模型、改 Prompt 和改 Schema，就无法建立因果关系。</p>
+<h3 id="section-5-把失败固化为评测">5. 把失败固化为评测</h3>
+<p>修复后的 Case 进入回归集，既检查最终输出，也检查中间行为，例如“不得调用任何写工具”。</p>
+<h2 id="section-agent-debug-需要三类测试">Agent Debug 需要三类测试</h2>
+<h3 id="section-确定性单元测试">确定性单元测试</h3>
+<p>用于 Runtime 代码：</p>
+<ul>
+<li>Schema 校验；</li>
+<li>权限判断；</li>
+<li>Retry 分类；</li>
+<li>Context 截断；</li>
+<li>Tool Mapping；</li>
+<li>State 迁移。</li>
+</ul>
+<p>这些仍应追求完全可重复。</p>
+<h3 id="section-轨迹评测">轨迹评测</h3>
+<p>使用固定 Observation 或 Mock Tool 检查：</p>
+<ul>
+<li>是否选择正确工具；</li>
+<li>是否先读后写；</li>
+<li>是否在高风险操作前确认；</li>
+<li>是否在证据不足时停止；</li>
+<li>是否超过轮次预算。</li>
+</ul>
+<p>它关注过程，而不只是最终措辞。</p>
+<h3 id="section-端到端统计评测">端到端统计评测</h3>
+<p>在接近生产的环境重复运行，观察：</p>
+<ul>
+<li>任务完成率；</li>
+<li>严重错误率；</li>
+<li>平均工具次数；</li>
+<li>P95 延迟和成本；</li>
+<li>人工接管率。</li>
+</ul>
+<p>它衡量完整系统在非确定性下的分布。</p>
+<h2 id="section-问模型为什么只能作为线索">“问模型为什么”只能作为线索</h2>
+<p>让模型解释“为什么选择这个工具”可能有帮助，但不能当作真实因果证据。模型生成的理由也是下一段文本，可能是事后合理化，并不等于内部决策过程的忠实记录。</p>
+<p>可靠证据来自：</p>
+<ul>
+<li>当时可见的候选工具；</li>
+<li>原始输出；</li>
+<li>Context 内容；</li>
+<li>Runtime 执行记录；</li>
+<li>控制变量实验；</li>
+<li>大样本行为变化。</li>
+</ul>
+<p>解释文本可以帮助提出假设，Trace 和实验负责验证假设。</p>
+<h2 id="section-代码仍然重要但不再是全部程序">代码仍然重要，但不再是全部程序</h2>
+<p>Agent 的实际行为由三部分共同产生：</p>
+<pre><code class="language-text">确定性代码
++ 运行时数据与环境
++ 概率性模型决策
+</code></pre>
+<p>传统 Debug 强调从输出回到代码路径；Agent Debug 还要恢复当时的决策环境。没有 Prompt 版本、Context Manifest、Tool Schema 和 Observation，哪怕源代码一行未变，也无法解释行为。</p>
+<p>所以 Agent 最难 Debug 的地方不是代码，并不是说代码不重要，而是说<strong>执行轨迹本身已经成为程序的一部分</strong>。</p>
+<p>工程方法也要随之改变：</p>
+<pre><code class="language-text">从单次复现 → 重复实验
+从只看异常 → 找第一处行为偏离
+从只查代码 → 查完整 Trace
+从只测答案 → 同时测试过程约束
+</code></pre>
+<p>当每次决策都可追踪、每个变量都可固定、每个失败都能进入回归集，Agent 的不确定性才会从“玄学”变成可以测量和管理的工程对象。</p>
+
+    </article>
+  </main>
+
+  <footer class="site-footer article-footer">
+    <a href="../sections/agent.html">Agent 探索 / 核心机制</a>
+    <a href="https://github.com/yjd953/yjd953/blob/main/posts/agent-debugging.md">View source ↗</a>
+  </footer>
+  <script src="../assets/site.js" defer></script>
+</body>
+</html>

@@ -1,0 +1,220 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="通过长期运行任务，严格区分 Context、Memory、State 与 Knowledge。">
+  <meta name="theme-color" content="#f1f1ee">
+  <title>Context Window 为什么不是 Agent Memory？ — Dale Yang</title>
+  <link rel="stylesheet" href="../assets/site.css">
+</head>
+<body class="article-page">
+  <div class="reading-progress" id="readingProgress" aria-hidden="true"></div>
+
+  <header class="site-header">
+    <a class="wordmark" href="../" aria-label="Dale Yang home">DY<span>.</span></a>
+    <nav aria-label="Primary">
+      <a href="../sections/agent.html">Agent 探索</a>
+      <a href="https://github.com/yjd953">GitHub</a>
+    </nav>
+  </header>
+
+  <main class="article-layout">
+    <header class="article-masthead">
+      <a class="back-link" href="../sections/agent.html">← Agent 探索</a>
+      <p class="kicker">01.07 / Context / ZH</p>
+      <h1>Context Window 为什么不是 Agent Memory？</h1>
+      <p class="article-deck">通过长期运行任务，严格区分 Context、Memory、State 与 Knowledge。</p>
+    </header>
+
+    <article class="prose">
+      <p>“这个模型有 1M Context，所以不需要 Memory。”这句话把容量和持久化混在了一起。</p>
+<p>Context Window 回答的是：<strong>一次模型调用最多能处理多少输入与输出 Token。</strong><br>Memory 回答的是：<strong>哪些过去信息能跨调用保存，并在需要时重新出现。</strong></p>
+<p>一个窗口再大，也会随当前请求结束；一个 Memory Store 再小，只要能够持久化和检索，就可能跨越数月。</p>
+<h2 id="section-四个概念先放到同一张图里">四个概念先放到同一张图里</h2>
+<pre><code class="language-text">Knowledge ──检索──┐
+Memory ─────召回──┼→ Context → LLM → Decision
+State ──────投影──┘              │
+        ↑                         ↓
+        └──── Runtime 更新 ← Tool Result
+</code></pre>
+<h3 id="section-context本轮模型的可见输入">Context：本轮模型的可见输入</h3>
+<p>Context 是发给模型的一次请求内容，包括 System Prompt、消息、Tool Schema、检索片段和最新工具结果。它短暂、有上限，并且每轮都可能不同。</p>
+<h3 id="section-memory可跨调用保存并被召回的过去信息">Memory：可跨调用保存并被召回的过去信息</h3>
+<p>Memory 是关于用户、会话或任务的历史信息。它通常由 Runtime 写入数据库，再按当前目标检索。没有召回进 Context 的 Memory，本轮模型看不见。</p>
+<h3 id="section-state当前任务的权威进度">State：当前任务的权威进度</h3>
+<p>State 描述系统现在处于什么位置，例如：</p>
+<pre><code class="language-json">{
+  &quot;job_id&quot;: &quot;migration_42&quot;,
+  &quot;phase&quot;: &quot;copying&quot;,
+  &quot;copied_tables&quot;: 17,
+  &quot;failed_tables&quot;: [&quot;orders&quot;],
+  &quot;approval_required&quot;: false
+}
+</code></pre>
+<p>它用于控制状态迁移、恢复和并发，不应只存在于自然语言消息中。</p>
+<h3 id="section-knowledgeagent-可以访问的外部事实">Knowledge：Agent 可以访问的外部事实</h3>
+<p>Knowledge 通常来自文档库、代码仓库、产品手册或搜索引擎。它并不一定源于这个 Agent 的过去经历。</p>
+<p>例如“Redis Cluster 如何重定向”是知识；“用户上次选择了 Redis 7”是 Memory；“迁移任务正在复制第 17 张表”是 State；本轮 Prompt 中被选中的几段内容才是 Context。</p>
+<h2 id="section-用一个运行七天的-agent-看区别">用一个运行七天的 Agent 看区别</h2>
+<p>假设 Agent 负责数据库迁移：</p>
+<blockquote>
+<p>将 120 张表从旧集群迁到新集群，分批校验，遇到高风险差异时等待人工确认。</p>
+</blockquote>
+<p>任务不可能在一次模型调用中完成。它会经历执行、限流、暂停、人工确认和进程重启。</p>
+<h3 id="section-第一天建立任务">第一天：建立任务</h3>
+<p>Runtime 持久化 State：</p>
+<pre><code class="language-json">{
+  &quot;phase&quot;: &quot;planning&quot;,
+  &quot;pending_tables&quot;: 120,
+  &quot;completed_tables&quot;: 0,
+  &quot;status&quot;: &quot;running&quot;
+}
+</code></pre>
+<p>Agent 检索 Knowledge：</p>
+<ul>
+<li>迁移操作手册；</li>
+<li>表一致性校验规则；</li>
+<li>目标集群的配额说明。</li>
+</ul>
+<p>它还从 Memory 取回项目偏好：</p>
+<ul>
+<li>该团队禁止在工作日 18:00 后切流；</li>
+<li>大表默认每批 5 张；</li>
+<li>用户要求所有 DDL 先确认。</li>
+</ul>
+<p>Context Builder 只把当前规划所需内容放入第一轮 Context。模型生成批次计划后，这次 Context 生命周期结束。</p>
+<h3 id="section-第三天进程重启">第三天：进程重启</h3>
+<p>如果所谓 Memory 只是“前几天的消息还在 Context 里”，进程重启后任务就失去进度。正确恢复依赖 State Store：</p>
+<pre><code class="language-json">{
+  &quot;phase&quot;: &quot;validating&quot;,
+  &quot;completed_tables&quot;: 63,
+  &quot;current_batch&quot;: [&quot;orders&quot;, &quot;order_items&quot;],
+  &quot;checkpoint_version&quot;: 28,
+  &quot;status&quot;: &quot;running&quot;
+}
+</code></pre>
+<p>Runtime 根据 State 重建下一轮 Context，而不是把三天的所有日志重新发送给模型。</p>
+<p>这说明 State 不只是供模型参考的信息，它是 Runtime 恢复执行的权威依据。</p>
+<h3 id="section-第五天出现-schema-差异">第五天：出现 Schema 差异</h3>
+<p>工具返回：</p>
+<pre><code class="language-json">{
+  &quot;table&quot;: &quot;orders&quot;,
+  &quot;difference&quot;: &quot;target missing index idx_created_at&quot;,
+  &quot;severity&quot;: &quot;high&quot;
+}
+</code></pre>
+<p>这个 Observation 进入当前 Context。Agent 从 Knowledge Base 检索索引迁移规范，再结合 Memory 中“所有 DDL 先确认”的用户规则，决定暂停。</p>
+<p>Runtime 更新 State：</p>
+<pre><code class="language-json">{
+  &quot;status&quot;: &quot;waiting_for_approval&quot;,
+  &quot;pending_action&quot;: {
+    &quot;type&quot;: &quot;create_index&quot;,
+    &quot;table&quot;: &quot;orders&quot;
+  }
+}
+</code></pre>
+<p>四种信息在此各司其职：</p>
+<ul>
+<li>Observation 是刚发生的事实；</li>
+<li>Knowledge 提供通用操作规范；</li>
+<li>Memory 提供这个用户的长期约束；</li>
+<li>State 控制任务进入等待态；</li>
+<li>Context 只是把本轮需要的几项组合给模型。</li>
+</ul>
+<h3 id="section-第七天用户批准">第七天：用户批准</h3>
+<p>新的用户事件到达后，Runtime 从 State 恢复任务，读取审批结果，检索必要的 DDL 规范，构造一个新的 Context。</p>
+<p>第一天的 Context 早已不存在，但任务没有失忆，因为真正需要持久化的内容位于 State、Memory 和 Knowledge Store 中。</p>
+<h2 id="section-为什么把长-context-当-memory-会失败">为什么把长 Context 当 Memory 会失败</h2>
+<h3 id="section-失败一窗口最终仍会满">失败一：窗口最终仍会满</h3>
+<p>无论 128K 还是 1M Token，都不是无限。长期任务中的日志、代码、工具结果会持续增长。简单地“全部保留”只是推迟溢出时间。</p>
+<h3 id="section-失败二有效信息会被噪声淹没">失败二：有效信息会被噪声淹没</h3>
+<p>大窗口意味着模型可以接收更多内容，不意味着它能同等准确地使用每个细节。过期计划、重复日志和失败尝试可能干扰当前决策。</p>
+<h3 id="section-失败三无法提供可靠更新语义">失败三：无法提供可靠更新语义</h3>
+<p>历史中先说预算 800，后来改成 1000。完整保留两条消息并不能告诉程序哪个是当前权威值。结构化 Memory 可以用版本或时间戳明确覆盖关系。</p>
+<h3 id="section-失败四无法支撑恢复与并发">失败四：无法支撑恢复与并发</h3>
+<p>两个 Worker 同时处理同一任务时，需要状态版本和原子更新。Prompt 文本不能提供 Compare-And-Set，也不能防止重复执行同一步。</p>
+<h3 id="section-失败五权限与删除难以控制">失败五：权限与删除难以控制</h3>
+<p>长期 Memory 需要按用户、租户和数据类型隔离，也要响应删除请求。把所有历史复制进多个 Prompt、缓存和日志，会让数据生命周期更难治理。</p>
+<h2 id="section-context-不是仓库而是工作台">Context 不是仓库，而是工作台</h2>
+<p>一个实用类比是：</p>
+<ul>
+<li><strong>Knowledge</strong> 像图书馆，保存外部可查询资料；</li>
+<li><strong>Memory</strong> 像档案柜，保存与这个用户或任务过去有关的信息；</li>
+<li><strong>State</strong> 像任务控制表，记录当前进度和合法下一步；</li>
+<li><strong>Context</strong> 像工作台，只摆放眼前这一步要使用的材料。</li>
+</ul>
+<p>工作台可以很大，但不应该把整座图书馆和所有档案永远堆在上面。</p>
+<h2 id="section-context-builder-才是连接点">Context Builder 才是连接点</h2>
+<p>Runtime 每轮要做一次上下文编排：</p>
+<pre><code class="language-python">context = build_context(
+    system_policy=policy.for_task(run.type),
+    recent_messages=history.tail(8),
+    state=state.project_for_model(),
+    memories=memory.search(run.goal, limit=5),
+    knowledge=knowledge.search(current_question, limit=6),
+    latest_observations=run.unconsumed_observations(),
+    token_budget=64_000,
+)
+</code></pre>
+<p>这里的关键不是具体数字，而是每种来源都有独立预算、可信度和裁剪规则。</p>
+<p>State 投影还要隐藏模型不需要的信息。例如数据库锁版本、内部权限令牌不应进入 Prompt；模型只需要看到“正在等待审批”和待审批动作。</p>
+<h2 id="section-如何判断一条信息应该放哪里">如何判断一条信息应该放哪里</h2>
+<p>可以按四个问题判断：</p>
+<div class="table-scroll"><table>
+<thead>
+<tr>
+<th>问题</th>
+<th>是</th>
+<th>更适合</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>只为当前模型调用服务？</td>
+<td>是</td>
+<td>Context</td>
+</tr>
+<tr>
+<td>来源于过去交互，未来可能复用？</td>
+<td>是</td>
+<td>Memory</td>
+</tr>
+<tr>
+<td>决定任务能否继续、恢复或避免重复？</td>
+<td>是</td>
+<td>State</td>
+</tr>
+<tr>
+<td>是独立于当前用户的外部事实或资料？</td>
+<td>是</td>
+<td>Knowledge</td>
+</tr>
+</tbody></table></div>
+<p>同一事实也可能在层之间流动。工具读到的订单状态先作为 Observation 进入 Context；若它决定流程进度，则写入 State；若是未来仍有价值的用户偏好，才进入 Memory。复制时要保留来源和更新时间。</p>
+<h2 id="section-大窗口改变策略但不消灭-memory">大窗口改变策略，但不消灭 Memory</h2>
+<p>更大的 Context Window 确实有价值：</p>
+<ul>
+<li>可以保留更多原始证据，减少过度摘要；</li>
+<li>代码任务可以一次读取更多相关文件；</li>
+<li>长文分析不必过早切块；</li>
+<li>检索结果能带上更完整的上下文。</li>
+</ul>
+<p>它降低了“本轮材料摆不下”的压力，却没有解决跨运行持久化、精确更新、权限隔离、状态恢复和知识治理。</p>
+<p>真正长期运行的 Agent 会把四层清楚分开：</p>
+<pre><code class="language-text">Context：给模型看的临时输入
+Memory：从过去保留下来的可召回信息
+State：Runtime 用来推进任务的当前事实
+Knowledge：Agent 可查询的外部知识
+</code></pre>
+<p>当系统出现“它明明记得却没用”“重启后重复执行”“旧偏好覆盖新偏好”时，问题往往不是 Context 不够大，而是这四类数据没有被分开设计。</p>
+
+    </article>
+  </main>
+
+  <footer class="site-footer article-footer">
+    <a href="../sections/agent.html">Agent 探索 / 核心机制</a>
+    <a href="https://github.com/yjd953/yjd953/blob/main/posts/context-window-vs-memory.md">View source ↗</a>
+  </footer>
+  <script src="../assets/site.js" defer></script>
+</body>
+</html>

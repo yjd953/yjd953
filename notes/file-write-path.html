@@ -1,0 +1,563 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="从文件描述符、系统调用、Inode、Page Cache 和 Block 一路走到 SSD。">
+  <meta name="theme-color" content="#f1f1ee">
+  <title>一个文件到底是怎么存进硬盘的？ — Dale Yang</title>
+  <link rel="stylesheet" href="../assets/site.css">
+</head>
+<body class="article-page">
+  <div class="reading-progress" id="readingProgress" aria-hidden="true"></div>
+
+  <header class="site-header">
+    <a class="wordmark" href="../" aria-label="Dale Yang home">DY<span>.</span></a>
+    <nav aria-label="Primary">
+      <a href="../sections/computer-systems.html">计算机底层</a>
+      <a href="https://github.com/yjd953">GitHub</a>
+    </nav>
+  </header>
+
+  <main class="article-layout">
+    <header class="article-masthead">
+      <a class="back-link" href="../sections/computer-systems.html">← 计算机底层</a>
+      <p class="kicker">02.17 / Filesystem / ZH</p>
+      <h1>一个文件到底是怎么存进硬盘的？</h1>
+      <p class="article-deck">从文件描述符、系统调用、Inode、Page Cache 和 Block 一路走到 SSD。</p>
+    </header>
+
+    <article class="prose">
+      <p>严格说，不能只调用：</p>
+<pre><code class="language-c">write(&quot;hello&quot;);
+</code></pre>
+<p>POSIX <code>write()</code> 至少需要一个文件描述符：</p>
+<pre><code class="language-c">write(fd, &quot;hello&quot;, 5);
+</code></pre>
+<p>这个 <code>fd</code> 从哪里来？<code>hello</code> 写到了哪个文件？为什么 <code>write()</code> 返回后拔电源仍可能丢失？文件名、Inode、Page Cache 和硬盘 Block 又是什么关系？</p>
+<p>一条典型路径是：</p>
+<pre><code class="language-text">Path
+→ open()
+→ File Descriptor
+→ Open File Description
+→ VFS
+→ Dentry / Inode
+→ Page Cache
+→ Filesystem Extent / Block
+→ Block Device
+→ SSD
+</code></pre>
+<p>要理解“文件存在哪里”，必须同时看命名、运行时对象、缓存和持久化数据四个层次。</p>
+<h2 id="section-先写一个最小程序">先写一个最小程序</h2>
+<pre><code class="language-c">#include &lt;fcntl.h&gt;
+#include &lt;unistd.h&gt;
+
+int main(void) {
+    int fd = open(
+        &quot;message.txt&quot;,
+        O_WRONLY | O_CREAT | O_TRUNC,
+        0644
+    );
+    if (fd == -1) return 1;
+
+    const char *data = &quot;hello&quot;;
+    ssize_t n = write(fd, data, 5);
+    if (n != 5) return 2;
+
+    if (fsync(fd) == -1) return 3;
+    if (close(fd) == -1) return 4;
+    return 0;
+}
+</code></pre>
+<p>程序做了四件不同的事：</p>
+<pre><code class="language-text">open   解析名字并建立进程到文件的引用
+write  修改文件内容
+fsync  请求把相关状态推进到持久化边界
+close  释放本进程的文件描述符引用
+</code></pre>
+<p><code>close()</code> 不等于 <code>fsync()</code>；<code>write()</code> 成功也不等于数据已进入 NAND。</p>
+<h2 id="section-文件名不是文件本体">文件名不是文件本体</h2>
+<p>路径：</p>
+<pre><code class="language-text">/home/dale/message.txt
+</code></pre>
+<p>是从目录树寻找对象的方式。路径中的每一段通常对应 Directory Entry：</p>
+<pre><code class="language-text">/
+└─ home
+   └─ dale
+      └─ message.txt
+</code></pre>
+<p>在传统 Unix 文件系统模型中，目录项主要建立：</p>
+<pre><code class="language-text">name → inode number
+</code></pre>
+<p>Inode 保存文件元数据，例如：</p>
+<ul>
+<li>文件类型；</li>
+<li>权限与所有者；</li>
+<li>文件大小；</li>
+<li>时间戳；</li>
+<li>Link Count；</li>
+<li>数据 Extent 或 Block 映射；</li>
+<li>扩展属性引用；</li>
+<li>文件系统状态字段。</li>
+</ul>
+<p>文件名通常不存放在目标文件自己的 Inode 中，而存在父目录的数据结构里。因此同一个 Inode 可以有多个名字，也就是 Hard Link：</p>
+<pre><code class="language-text">name-a ─┐
+        ├→ inode 1207 → data blocks
+name-b ─┘
+</code></pre>
+<p>“文件就是文件名”从一开始就不准确。</p>
+<h2 id="section-open-如何沿路径找到-inode"><code>open()</code> 如何沿路径找到 Inode</h2>
+<p>程序调用：</p>
+<pre><code class="language-c">open(&quot;message.txt&quot;, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+</code></pre>
+<p>现代 Linux libc 常最终使用 <code>openat()</code> 或相关系统调用。内核从以下位置开始 Path Walk：</p>
+<ul>
+<li>绝对路径从进程 Root 开始；</li>
+<li>相对路径从 Current Working Directory 或给定 Directory FD 开始。</li>
+</ul>
+<p>每个路径组件都要：</p>
+<pre><code class="language-text">lookup name in current directory
+→ permission check
+→ follow mount point if needed
+→ resolve symlink according to rules
+→ reach next dentry/inode
+</code></pre>
+<p>Linux VFS 使用 Dentry Cache 和 Inode Cache 减少重复读取目录和 Metadata：</p>
+<pre><code class="language-text">Dentry:
+  cached relationship between a name and inode
+
+Inode:
+  cached in-memory representation of filesystem object metadata
+</code></pre>
+<p>Dentry 不等于磁盘目录项的原样复制，VFS Inode 也不等于所有文件系统都以同样二进制布局存储 Inode。它们是内核统一接口中的对象。</p>
+<h3 id="section-ocreat"><code>O_CREAT</code></h3>
+<p>若文件不存在，文件系统要：</p>
+<ul>
+<li>检查父目录写权限；</li>
+<li>分配新 Inode；</li>
+<li>在父目录加入名字映射；</li>
+<li>初始化 Mode、Owner、Timestamp；</li>
+<li>之后在需要时分配数据空间。</li>
+</ul>
+<h3 id="section-otrunc"><code>O_TRUNC</code></h3>
+<p>若普通文件已存在且允许写，文件长度被截为零。旧数据 Block 可被释放或延迟处理。这个 Metadata 修改也需要崩溃一致性保护。</p>
+<h2 id="section-file-descriptor-只是进程内的整数索引">File Descriptor 只是进程内的整数索引</h2>
+<p><code>open()</code> 返回：</p>
+<pre><code class="language-text">fd = 3
+</code></pre>
+<p>数字 <code>3</code> 本身不在磁盘上。它是当前进程 File Descriptor Table 的索引：</p>
+<pre><code class="language-text">Process fd table
+├─ 0 → stdin
+├─ 1 → stdout
+├─ 2 → stderr
+└─ 3 → open file description
+</code></pre>
+<p>Linux 内核术语中的 Open File Description 可抽象为：</p>
+<pre><code class="language-text">current file offset
+open status flags
+reference to inode / file object
+credentials and operation table
+</code></pre>
+<p>这解释了几个行为。</p>
+<h3 id="section-两次独立-open-通常有独立-offset">两次独立 <code>open()</code> 通常有独立 Offset</h3>
+<pre><code class="language-c">int a = open(&quot;x&quot;, O_WRONLY);
+int b = open(&quot;x&quot;, O_WRONLY);
+</code></pre>
+<p><code>a</code> 与 <code>b</code> 指向同一文件对象，但拥有各自 Open File Description，因此文件 Offset 独立。</p>
+<h3 id="section-dup-或-fork-后可共享-offset"><code>dup()</code> 或 <code>fork()</code> 后可共享 Offset</h3>
+<p>复制 Descriptor 常让两个 FD 引用同一个 Open File Description：</p>
+<pre><code class="language-text">fd 3 ─┐
+      ├→ one open file description → inode
+fd 7 ─┘
+</code></pre>
+<p>一方写入推进 Offset，另一方观察到相同 Offset。</p>
+<h3 id="section-fd-只在进程上下文中有意义">FD 只在进程上下文中有意义</h3>
+<p>另一个进程的 FD <code>3</code> 可以指向完全不同的对象。向远程 API 传整数 <code>3</code>，不会自动传递文件访问能力。Unix Domain Socket 的 Descriptor Passing 是专门机制。</p>
+<h2 id="section-write-首先处理-offset-和权限"><code>write()</code> 首先处理 Offset 和权限</h2>
+<p>调用：</p>
+<pre><code class="language-c">write(fd, &quot;hello&quot;, 5);
+</code></pre>
+<p>CPU 从用户态进入内核态。内核大致执行：</p>
+<pre><code class="language-text">validate fd
+→ find open file description
+→ check writable mode
+→ determine current offset
+→ call filesystem write path
+→ copy or pin user memory
+→ update offset
+→ return byte count
+</code></pre>
+<p>若当前 Offset 为 0，成功写入 5 Bytes 后通常变为 5。</p>
+<p><code>pwrite()</code> 显式给出 Offset，不修改共享 File Offset：</p>
+<pre><code class="language-c">pwrite(fd, &quot;hello&quot;, 5, 0);
+</code></pre>
+<h3 id="section-oappend-不只是先-lseek"><code>O_APPEND</code> 不只是先 <code>lseek</code></h3>
+<p>多个进程向同一文件追加时，用户态执行：</p>
+<pre><code class="language-text">lseek(fd, 0, SEEK_END)
+write(fd, data, len)
+</code></pre>
+<p>两步之间存在 Race。<code>O_APPEND</code> 要求内核把“定位到当前末尾并写入”作为单次写操作的一部分处理。</p>
+<p>但这不意味着任意大的并发写永远以应用消息为单位完全不可交错，也不自动提供事务持久性。具体原子性受文件类型、文件系统和接口保证限制。</p>
+<h2 id="section-write-允许部分成功"><code>write()</code> 允许部分成功</h2>
+<p>返回值可能小于请求长度：</p>
+<pre><code class="language-c">ssize_t n = write(fd, buf, len);
+</code></pre>
+<p>原因可能包括：</p>
+<ul>
+<li>磁盘空间不足；</li>
+<li>文件大小限制；</li>
+<li>Signal；</li>
+<li>I/O Error；</li>
+<li>Non-blocking 对象当前无法接收更多；</li>
+<li>特定文件或设备语义。</li>
+</ul>
+<p>正确调用方要处理：</p>
+<pre><code class="language-c">size_t written = 0;
+while (written &lt; len) {
+    ssize_t n = write(fd, buf + written, len - written);
+    if (n &gt; 0) {
+        written += (size_t)n;
+        continue;
+    }
+    /* handle EINTR and real errors */
+}
+</code></pre>
+<p>普通 Buffered Regular File 写入常一次接收全部小 Buffer，但不能把常见现象误当 API 的绝对承诺。</p>
+<h2 id="section-buffered-write-先进入-page-cache">Buffered Write 先进入 Page Cache</h2>
+<p>常见写路径不是直接提交 SSD Command，而是定位文件对应的 Page Cache Page：</p>
+<pre><code class="language-text">key: inode + file page index
+</code></pre>
+<p>例如 OS Memory Page 为 4KiB，写 Offset 0..4：</p>
+<pre><code class="language-text">File Page 0
+┌───────────────────────────────────────┐
+│ hello │ unchanged / zeroed area ...   │
+└───────────────────────────────────────┘
+</code></pre>
+<p>内核把用户态的 5 Bytes 复制进去，并标记 Dirty：</p>
+<pre><code class="language-text">page.dirty = true
+</code></pre>
+<p>同时更新内存中的文件大小和时间等状态。随后 <code>write()</code> 就可能返回。</p>
+<p>因此此时文件同时存在多个表示：</p>
+<pre><code class="language-text">Persistent data blocks: old content
+Page Cache:             new content &quot;hello&quot;
+In-memory inode:        new size = 5
+</code></pre>
+<p>对同一机器上的后续 <code>read()</code>，内核通常从 Page Cache 返回新内容，所以程序能立刻读到 <code>hello</code>。这证明缓存一致，不证明数据已持久。</p>
+<h2 id="section-文件系统可能延迟分配物理-block">文件系统可能延迟分配物理 Block</h2>
+<p>写入发生时，文件系统不一定马上决定最终 Block 位置。Delayed Allocation 可以先记录：</p>
+<pre><code class="language-text">file logical range 0..4095 is dirty
+physical extent not chosen yet
+</code></pre>
+<p>等 Writeback 时再为一批数据选择连续 Extent。好处包括：</p>
+<ul>
+<li>更好的空间布局；</li>
+<li>减少碎片；</li>
+<li>合并小写；</li>
+<li>避免很快被覆盖的数据产生无效分配。</li>
+</ul>
+<p>代价是 <code>write()</code> 成功时，物理空间可能还没真正分配。文件系统必须处理后续 ENOSPC、Writeback Error 和崩溃语义。</p>
+<p>Sparse File 更能说明逻辑大小与物理占用不同：</p>
+<pre><code class="language-c">lseek(fd, 1L &lt;&lt; 30, SEEK_SET);
+write(fd, &quot;x&quot;, 1);
+</code></pre>
+<p>文件逻辑大小约 1GiB，但中间 Hole 不必占据真实数据 Block；读取 Hole 时返回零。</p>
+<pre><code class="language-text">logical file:
+[hole........................][x]
+
+allocated blocks:
+                              [block]
+</code></pre>
+<h2 id="section-inode-如何找到文件内容">Inode 如何找到文件内容</h2>
+<p>简单模型会把 Inode 画成一组 Direct/Indirect Block Pointer。现代文件系统常使用 Extent：</p>
+<pre><code class="language-text">file logical blocks 0..127
+→ device logical blocks 900000..900127
+</code></pre>
+<p>Extent 用“起点 + 长度”描述连续区域，减少大文件映射 Metadata。</p>
+<p>读取某个 Offset：</p>
+<pre><code class="language-text">offset
+→ logical file block
+→ extent lookup
+→ device LBA
+→ block read
+→ page cache
+→ user buffer
+</code></pre>
+<p>写入时，Extent Tree 自身也可能改变。因此保存 5 Bytes 可能涉及的不只数据：</p>
+<ul>
+<li>文件数据块；</li>
+<li>Inode Size；</li>
+<li>Extent Metadata；</li>
+<li>Free-Space Bitmap/Tree；</li>
+<li>Parent Directory，若文件刚创建；</li>
+<li>文件系统 Journal 或新的 Copy-on-Write Tree Node。</li>
+</ul>
+<h2 id="section-文件系统-journal-保护什么">文件系统 Journal 保护什么</h2>
+<p>假设创建文件需要：</p>
+<pre><code class="language-text">allocate inode
+allocate data block
+add directory entry
+update free-space metadata
+</code></pre>
+<p>若这些 Metadata 原地更新到一半就断电，文件系统结构可能自相矛盾。Journaling Filesystem 先记录一组 Metadata 变更，再按协议应用到主位置。</p>
+<p>常见思想：</p>
+<pre><code class="language-text">begin transaction
+→ log metadata changes
+→ commit journal transaction
+→ write home locations
+→ checkpoint / reclaim journal
+</code></pre>
+<p>具体模式可能只 Journal Metadata，也可能 Journal Data。以 Linux ext4 为例，不同 Data Mode 的顺序与保证不同；其他文件系统采用 Copy-on-Write 或各自日志机制。</p>
+<p>文件系统 Journal 主要保证：</p>
+<pre><code class="language-text">after crash, filesystem structure remains recoverable
+</code></pre>
+<p>它不自动保证：</p>
+<pre><code class="language-text">application&#39;s several files form one business transaction
+</code></pre>
+<p>数据库仍需要 WAL，应用仍需正确使用 <code>fsync()</code>、原子 Rename 或事务存储协议。</p>
+<h2 id="section-dirty-page-如何被写回">Dirty Page 如何被写回</h2>
+<p>Writeback 可由多种条件触发：</p>
+<ul>
+<li>Dirty Page 存在太久；</li>
+<li>脏页占比达到阈值；</li>
+<li>内存回收；</li>
+<li><code>fsync()</code> / <code>fdatasync()</code>；</li>
+<li><code>sync()</code>；</li>
+<li>文件系统 Checkpoint；</li>
+<li>应用显式同步写。</li>
+</ul>
+<p>内核与文件系统大致执行：</p>
+<pre><code class="language-text">collect dirty pages
+→ allocate / resolve extents
+→ build block I/O
+→ preserve required data/metadata ordering
+→ submit to block layer
+→ mark writeback completion
+</code></pre>
+<p>多个相邻 File Page 可以形成更大、更连续的 I/O。一次 5-Byte 修改最终可能写一个完整文件系统 Block 或存储逻辑块范围。</p>
+<p>Page Cache 的 Page、Filesystem Block、Block Device Logical Block 与 SSD NAND Page 不是同一个单位：</p>
+<pre><code class="language-text">VM page:             CPU/OS memory management
+filesystem block:    file layout and allocation
+device logical block:LBA interface
+NAND page:           flash read/program unit
+</code></pre>
+<p>它们可能恰好同为 4KiB，也不能因此视为同一个对象。</p>
+<h2 id="section-block-device-与-ssd-看不到文件名">Block Device 与 SSD 看不到文件名</h2>
+<p>文件系统生成请求：</p>
+<pre><code class="language-text">WRITE LBA 900000, length 4096
+</code></pre>
+<p>到了设备层，<code>message.txt</code> 这个名字已经不存在。SSD 只看到：</p>
+<ul>
+<li>Read / Write / Flush / Discard 等命令；</li>
+<li>LBA；</li>
+<li>Block Count；</li>
+<li>Queue / Command ID；</li>
+<li>Flags。</li>
+</ul>
+<p>SSD Controller 的 FTL 再把 LBA 映射到 NAND 位置。覆盖同一 LBA 时，它通常写入新 NAND Page、更新映射并把旧 Page 标记无效。</p>
+<p>所以问“<code>message.txt</code> 在 NAND 的哪几格”通常没有稳定答案：</p>
+<ul>
+<li>文件系统 Extent 可能变化；</li>
+<li>SSD FTL 映射对主机不可见；</li>
+<li>Garbage Collection 会在主机不写该文件时迁移物理 Page；</li>
+<li>Snapshot、Compression、Encryption、RAID 和虚拟化还会加入更多映射。</li>
+</ul>
+<p>路径名只存在于文件系统命名层，不会一路刻在每个 NAND Page 上。</p>
+<h2 id="section-fsync-到底补上什么"><code>fsync()</code> 到底补上什么</h2>
+<p>普通 <code>write()</code> 只要求内核接受数据。<code>fsync(fd)</code> 请求把文件内容和恢复该内容所需 Metadata 同步到持久化存储。</p>
+<p>简化顺序：</p>
+<pre><code class="language-text">dirty file pages
+→ allocate blocks
+→ write data
+→ journal / metadata ordering
+→ device cache flush as required
+→ wait
+→ fsync returns
+</code></pre>
+<p><code>fdatasync()</code> 可减少与数据检索无关的 Metadata 同步，但文件大小等必要 Metadata 仍需处理。实际差异由平台决定。</p>
+<h3 id="section-close-为什么不够"><code>close()</code> 为什么不够</h3>
+<p><code>close(fd)</code> 释放 Descriptor 引用并报告一部分延迟错误，但系统通常仍可把 Dirty Page 留在 Page Cache，稍后后台写回。</p>
+<pre><code class="language-text">write
+→ close
+→ program exits
+→ kernel still has dirty pages
+</code></pre>
+<p>因此“程序正常退出了”不等于“机器断电也不会丢”。</p>
+<h3 id="section-文件-fsync-为什么有时还不够">文件 <code>fsync()</code> 为什么有时还不够</h3>
+<p>创建新文件涉及父目录中的名字映射：</p>
+<pre><code class="language-text">message.txt → inode 1207
+</code></pre>
+<p>为了保证断电后名字也存在，常见持久写模式要同步文件，再同步父目录：</p>
+<pre><code class="language-c">fsync(file_fd);
+fsync(directory_fd);
+</code></pre>
+<p>具体要求和实现受操作系统、文件系统以及操作类型影响，但不能默认“文件内容同步”必然包含所有目录项持久化。</p>
+<h2 id="section-如何原子替换配置文件">如何原子替换配置文件</h2>
+<p>直接覆盖原文件：</p>
+<pre><code class="language-text">open config
+truncate
+write new bytes
+crash halfway
+</code></pre>
+<p>可能留下空文件或半份内容。常见模式：</p>
+<pre><code class="language-text">1. create temp file in same directory
+2. write complete new content
+3. fsync(temp file)
+4. rename(temp, target)
+5. fsync(parent directory)
+</code></pre>
+<p>同一文件系统内的 <code>rename()</code> 通常提供命名层面的原子切换：</p>
+<pre><code class="language-text">reader sees old complete file
+or new complete file
+not a half-renamed name
+</code></pre>
+<p>但原子可见性不等于断电持久性。<code>fsync</code> 步骤用于确保内容和目录变更经得住崩溃。还要处理权限、Owner、扩展属性、备份策略和失败清理。</p>
+<h2 id="section-unlink-后文件为什么还能读"><code>unlink()</code> 后文件为什么还能读</h2>
+<p>打开文件后执行：</p>
+<pre><code class="language-c">unlink(&quot;message.txt&quot;);
+</code></pre>
+<p>删除的是目录中的名字：</p>
+<pre><code class="language-text">message.txt -X-&gt; inode
+</code></pre>
+<p>只要进程仍持有打开引用：</p>
+<pre><code class="language-text">fd → open file description → inode → data
+</code></pre>
+<p>它仍然可以读写。等 Link Count 为零且最后一个打开引用释放后，文件系统才回收 Inode 和数据 Block。</p>
+<p>这说明文件有两个独立生命周期：</p>
+<pre><code class="language-text">namespace lifetime: path / hard links
+open-reference lifetime: fd / kernel references
+</code></pre>
+<p>Linux 上，日志文件被删除但进程仍打开时，<code>df</code> 可能显示空间未释放。可查：</p>
+<pre><code class="language-bash">lsof +L1
+</code></pre>
+<p>这类“deleted but open”文件没有正常路径名，却仍作为内核和文件系统对象存在。</p>
+<h2 id="section-mmap-写文件走哪条路"><code>mmap()</code> 写文件走哪条路</h2>
+<p>应用还可以：</p>
+<pre><code class="language-c">void *p = mmap(..., MAP_SHARED, fd, 0);
+memcpy(p, &quot;hello&quot;, 5);
+</code></pre>
+<p>CPU Store 修改映射的文件 Page，页面变 Dirty。持久化通常需要：</p>
+<pre><code class="language-c">msync(..., MS_SYNC);
+</code></pre>
+<p>并根据 Metadata 与目录操作考虑 <code>fsync()</code> 等要求。</p>
+<p><code>mmap</code> 省去了显式 <code>write()</code> 调用形式，但没有绕过 Page Cache、文件系统和持久化协议。异常访问还可能通过 Page Fault 延迟载入 Page。</p>
+<h2 id="section-direct-io-改变缓存不改变文件概念">Direct I/O 改变缓存，不改变文件概念</h2>
+<p>使用 <code>O_DIRECT</code> 等机制时，文件数据可绕过普通 Page Cache：</p>
+<pre><code class="language-text">user buffer
+→ filesystem direct-I/O path
+→ block layer
+→ device
+</code></pre>
+<p>它通常对 Buffer Alignment、Offset 和 Length 有要求，且语义因平台与文件系统而异。</p>
+<p>Direct I/O 可以：</p>
+<ul>
+<li>避免数据库 Buffer Pool 与 OS Page Cache 双重缓存；</li>
+<li>减少复制或缓存污染；</li>
+<li>让应用更直接控制 I/O。</li>
+</ul>
+<p>但它不表示：</p>
+<ul>
+<li>不经过文件系统；</li>
+<li>数据已自动持久；</li>
+<li>不需要 Flush；</li>
+<li>每次小写都高效；</li>
+<li>不受设备 Cache 与 FTL 影响。</li>
+</ul>
+<p>同步性和缓存绕过是两个独立维度。</p>
+<h2 id="section-崩溃点实验">崩溃点实验</h2>
+<p>可以把程序改成几个版本，在一次性测试环境观察。</p>
+<h3 id="section-版本-a只-write">版本 A：只 <code>write</code></h3>
+<pre><code class="language-text">open
+write(&quot;hello&quot;)
+sleep
+</code></pre>
+<p>另一个进程立刻能读到 <code>hello</code>，因为 Page Cache 已更新。此时强制断电，内容未必持久。</p>
+<h3 id="section-版本-bwrite-后-close">版本 B：<code>write</code> 后 <code>close</code></h3>
+<p>进程退出后文件通常仍可见，后台也可能很快写回。但这不能建立严格断电保证。</p>
+<h3 id="section-版本-cwrite-后-fsync">版本 C：<code>write</code> 后 <code>fsync</code></h3>
+<p>在存储栈正确实现 Flush 契约的前提下，返回后内容获得更强持久性保证。</p>
+<h3 id="section-版本-d新建fsyncfile不-fsyncdir">版本 D：新建、<code>fsync(file)</code>，不 <code>fsync(dir)</code></h3>
+<p>可测试内容与目录项持久化是不同问题。不同文件系统和内核版本的结果可能不同，不能以一次实验反推通用标准。</p>
+<p>真正 Power-Loss 实验应在可丢弃虚拟机或专用测试设备中，从系统外部强制掉电。<code>kill -9</code> 只杀进程，不会清空 OS Page Cache。</p>
+<h2 id="section-用工具观察路径">用工具观察路径</h2>
+<h3 id="section-查看系统调用">查看系统调用</h3>
+<p>Linux：</p>
+<pre><code class="language-bash">strace -e trace=openat,write,fsync,close ./write-demo
+</code></pre>
+<p>可能看到：</p>
+<pre><code class="language-text">openat(..., &quot;message.txt&quot;, O_WRONLY|O_CREAT|O_TRUNC, 0644) = 3
+write(3, &quot;hello&quot;, 5) = 5
+fsync(3) = 0
+close(3) = 0
+</code></pre>
+<p>这只能证明进程发出了哪些系统调用，不能单独证明 SSD Firmware 最终如何放置数据。</p>
+<p>macOS 可使用 <code>dtruss</code>、<code>fs_usage</code> 等系统工具，但权限与 System Integrity Protection 会影响可用性。</p>
+<h3 id="section-查看-inode-与-block-占用">查看 Inode 与 Block 占用</h3>
+<p>Linux：</p>
+<pre><code class="language-bash">stat message.txt
+ls -li message.txt
+du -h message.txt
+du -h --apparent-size message.txt
+</code></pre>
+<p><code>ls -li</code> 可观察 Inode Number；<code>du</code> 的实际占用和表观大小在 Sparse File 中会明显不同。</p>
+<p>查看 Extent：</p>
+<pre><code class="language-bash">filefrag -v message.txt
+</code></pre>
+<p>输出是文件系统到逻辑 Block 的映射，不是 SSD 内部 NAND 物理位置。</p>
+<h3 id="section-查看打开文件">查看打开文件</h3>
+<pre><code class="language-bash">lsof message.txt
+ls -l /proc/&lt;pid&gt;/fd
+</code></pre>
+<p><code>/proc</code> 是 Linux 接口；macOS 可主要使用 <code>lsof</code>。</p>
+<h3 id="section-观察写回">观察写回</h3>
+<p>Linux 可查看：</p>
+<pre><code class="language-bash">grep -E &#39;Dirty|Writeback&#39; /proc/meminfo
+</code></pre>
+<p>全局数字变化受整个系统影响。要归因单个进程，需要更精细的 Tracepoint、eBPF 或文件系统工具。</p>
+<h2 id="section-文件到底在哪里存在">“文件”到底在哪里存在</h2>
+<p>可以把答案分成五层。</p>
+<h3 id="section-命名层">命名层</h3>
+<pre><code class="language-text">directory entry: &quot;message.txt&quot; → inode
+</code></pre>
+<p>回答“通过什么名字找到它”。</p>
+<h3 id="section-元数据层">元数据层</h3>
+<pre><code class="language-text">inode / filesystem metadata
+</code></pre>
+<p>回答“它是什么类型、多大、谁能访问、数据映射在哪里”。</p>
+<h3 id="section-进程运行时层">进程运行时层</h3>
+<pre><code class="language-text">fd → open file description → inode
+</code></pre>
+<p>回答“这个进程正在以什么模式、什么 Offset 使用它”。</p>
+<h3 id="section-缓存层">缓存层</h3>
+<pre><code class="language-text">page cache + dirty state
+</code></pre>
+<p>回答“当前最新字节是否暂存在 RAM，以及何时待写回”。</p>
+<h3 id="section-持久化层">持久化层</h3>
+<pre><code class="language-text">filesystem blocks
+→ logical block device
+→ controller mapping
+→ physical media
+</code></pre>
+<p>回答“断电后可从哪里恢复内容与结构”。</p>
+<p>没有任何一个对象单独等于完整的“文件”。文件是这些层共同维护的一组语义。</p>
+<h2 id="section-最终答案">最终答案</h2>
+<p><code>write(fd, &quot;hello&quot;, 5)</code> 首先通过 FD 找到进程打开的文件对象，再通过 VFS 和 Inode 定位文件。普通 Buffered I/O 把字节写入以 Inode 和文件页号索引的 Page Cache，更新内存 Metadata 并把页面标记为 Dirty。文件系统随后分配 Extent，把文件 Offset 映射成 Block Device LBA；Block Layer 与驱动把请求交给 SSD；SSD 的 FTL 最终再映射到 NAND Page。</p>
+<p>文件名没有被写进每个数据块，FD 也不是文件本体：</p>
+<pre><code class="language-text">Path     是名字
+FD       是进程内句柄
+Inode    是文件系统对象与元数据
+Page Cache 是当前内存副本
+Block    是文件系统和设备的分配单位
+NAND Page 是 SSD 内部物理存储单位
+</code></pre>
+<p><code>write()</code> 返回只表示内核接受了数据；<code>close()</code> 通常也不建立断电持久性。只有应用发出正确同步请求，文件系统维护好数据与 Metadata 顺序，Block Layer 和 SSD 又兑现 Flush 契约，<code>hello</code> 才真正成为断电后仍可找回的文件内容。</p>
+
+    </article>
+  </main>
+
+  <footer class="site-footer article-footer">
+    <a href="../sections/computer-systems.html">计算机底层 / 存储与数据库</a>
+    <a href="https://github.com/yjd953/yjd953/blob/main/posts/file-write-path.md">View source ↗</a>
+  </footer>
+  <script src="../assets/site.js" defer></script>
+</body>
+</html>

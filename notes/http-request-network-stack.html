@@ -1,0 +1,564 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="沿 HTTP、TCP、IP、Ethernet、NIC、Router 与 Internet 解释每一层增加的信息。">
+  <meta name="theme-color" content="#f1f1ee">
+  <title>一个 HTTP 请求是怎么跑到服务器的？ — Dale Yang</title>
+  <link rel="stylesheet" href="../assets/site.css">
+</head>
+<body class="article-page">
+  <div class="reading-progress" id="readingProgress" aria-hidden="true"></div>
+
+  <header class="site-header">
+    <a class="wordmark" href="../" aria-label="Dale Yang home">DY<span>.</span></a>
+    <nav aria-label="Primary">
+      <a href="../sections/computer-systems.html">计算机底层</a>
+      <a href="https://github.com/yjd953">GitHub</a>
+    </nav>
+  </header>
+
+  <main class="article-layout">
+    <header class="article-masthead">
+      <a class="back-link" href="../sections/computer-systems.html">← 计算机底层</a>
+      <p class="kicker">02.13 / Network stack / ZH</p>
+      <h1>一个 HTTP 请求是怎么跑到服务器的？</h1>
+      <p class="article-deck">沿 HTTP、TCP、IP、Ethernet、NIC、Router 与 Internet 解释每一层增加的信息。</p>
+    </header>
+
+    <article class="prose">
+      <p>先看一段最简单的 HTTP/1.1 请求：</p>
+<pre><code class="language-http">GET /users/42 HTTP/1.1
+Host: api.example.com
+Accept: application/json
+Connection: keep-alive
+</code></pre>
+<p>它是应用层能够理解的文本，但网卡不会解析 <code>GET</code>，路由器也不知道 <code>/users/42</code> 是什么。要把这些字节送到服务器，请求必须逐层进入网络栈：</p>
+<pre><code class="language-text">HTTP
+↓
+TCP
+↓
+IP
+↓
+Ethernet / Wi-Fi
+↓
+NIC
+↓
+Switch / Router / Internet
+</code></pre>
+<p>每层都不只是“套一层壳”。它会增加这一层完成任务所需的信息：</p>
+<pre><code class="language-text">HTTP:     请求哪个资源、执行什么操作
+TCP:      属于哪个进程、字节处于什么位置、是否已确认
+IP:       最终从哪台主机到哪台主机
+Ethernet: 当前链路上交给哪个下一跳
+NIC:      如何把内存中的帧变成物理信号
+</code></pre>
+<p>本文先用明文 HTTP/1.1 over TCP、IPv4、Ethernet 建立主线，再说明 HTTPS、HTTP/2、HTTP/3、Wi-Fi 和隧道会改变哪些部分。</p>
+<h2 id="section-请求最初只是一串用户态字节">请求最初只是一串用户态字节</h2>
+<p>应用可能通过库构造请求：</p>
+<pre><code class="language-go">req, _ := http.NewRequest(&quot;GET&quot;, &quot;http://api.example.com/users/42&quot;, nil)
+resp, err := http.DefaultClient.Do(req)
+</code></pre>
+<p>在线路上不会出现 Go 的 <code>http.Request</code> 对象。库最终把请求编码成协议字节。HTTP/1.1 大致是：</p>
+<pre><code class="language-text">47 45 54 20 2f 75 73 65 72 73 2f 34 32 20 ...
+ G  E  T     /  u  s  e  r  s  /  4  2
+</code></pre>
+<p>请求行和 Header 以 CRLF 分隔，Header 区域以空行结束：</p>
+<pre><code class="language-text">GET /users/42 HTTP/1.1\r\n
+Host: api.example.com\r\n
+Accept: application/json\r\n
+\r\n
+</code></pre>
+<p>若请求有 Body，HTTP 还要说明其边界，例如通过 <code>Content-Length</code> 或 HTTP/1.1 Chunked Transfer Coding。</p>
+<p>HTTP 层解决：</p>
+<ul>
+<li>Method 是 <code>GET</code>、<code>POST</code> 还是其他操作；</li>
+<li>Target 是哪个路径和 Query；</li>
+<li>请求属于哪个 Host；</li>
+<li>Body 用什么媒体类型编码；</li>
+<li>缓存、认证、内容协商等语义。</li>
+</ul>
+<p>它不负责选择网卡，不保证包不丢，也不知道 MAC 地址。</p>
+<h2 id="section-write-把字节交给-socket不是交给网卡"><code>write()</code> 把字节交给 Socket，不是交给网卡</h2>
+<p>客户端已经建立 TCP Socket 后，HTTP 库最终会执行类似：</p>
+<pre><code class="language-c">ssize_t n = write(socket_fd, request, request_len);
+</code></pre>
+<p>或者 <code>send()</code>、<code>writev()</code> 等接口。</p>
+<p>系统调用让内核根据文件描述符找到 Socket。一般情况下，内核把用户数据复制或引用到 Socket 的发送缓冲区，然后返回。此时：</p>
+<ul>
+<li>数据可能还没离开主机；</li>
+<li>甚至还没被切成最终线上 TCP Segment；</li>
+<li><code>write()</code> 成功不等于服务器应用已经收到；</li>
+<li>它通常只表示本机内核接受了这些字节。</li>
+</ul>
+<p>Blocking Socket 的 <code>write()</code> 也不是“等到网络发完才返回”。它可能在发送缓冲区空间不足时阻塞；Non-blocking Socket 则可能返回 <code>EAGAIN</code>。具体复制、聚合与 Zero-Copy 路径取决于系统调用和内核实现。</p>
+<h2 id="section-tcp-增加进程复用和可靠字节流信息">TCP 增加进程复用和可靠字节流信息</h2>
+<p>TCP 接过一段连续字节流，根据 MSS、拥塞窗口、发送窗口以及实现策略组织 Segment。</p>
+<p>典型 TCP Header 包含：</p>
+<pre><code class="language-text">Source Port
+Destination Port
+Sequence Number
+Acknowledgment Number
+Data Offset
+Flags
+Window Size
+Checksum
+Urgent Pointer
+Options
+</code></pre>
+<h3 id="section-端口把数据送到正确-socket">端口把数据送到正确 Socket</h3>
+<p>假设连接是：</p>
+<pre><code class="language-text">192.168.1.20:53142 → 203.0.113.10:80
+</code></pre>
+<p>源端口 <code>53142</code> 是客户端临时端口，目标端口 <code>80</code> 是服务器监听端口。服务器收到包后，通过协议、地址和端口定位连接状态：</p>
+<pre><code class="language-text">TCP + local IP:port + remote IP:port
+</code></pre>
+<p>IP 地址找到主机，端口再参与找到主机内的通信端点。把“端口等于进程”当成绝对关系并不准确：一个进程可持有多个端口；多个 Worker 也可能通过内核机制共享监听端口；已连接 Socket 依赖完整四元组区分。</p>
+<h3 id="section-sequence-number-描述字节位置">Sequence Number 描述字节位置</h3>
+<p>TCP 是字节流，不保留应用一次 <code>write()</code> 的消息边界。</p>
+<p>应用执行：</p>
+<pre><code class="language-text">write(&quot;GET &quot;)
+write(&quot;/users/42 ...&quot;)
+</code></pre>
+<p>接收方可能一次 <code>read()</code> 得到全部，也可能分多次得到。反过来，一次大 <code>write()</code> 也可能被拆成多个 Segment。</p>
+<p>序列号标记 Payload 第一个字节在发送字节流中的位置：</p>
+<pre><code class="language-text">Segment A: seq=1001, len=1000
+Segment B: seq=2001, len=460
+</code></pre>
+<p>接收方用序列号：</p>
+<ul>
+<li>检测缺口；</li>
+<li>重排乱序 Segment；</li>
+<li>丢弃重复数据；</li>
+<li>生成累计确认。</li>
+</ul>
+<p>ACK <code>2461</code> 表示：</p>
+<pre><code class="language-text">我已连续收到 2460 及以前的字节，
+下一步期待 2461。
+</code></pre>
+<p>SACK Option 可以额外报告不连续收到的区间，减少不必要重传。</p>
+<h3 id="section-window-与拥塞控制不是一回事">Window 与拥塞控制不是一回事</h3>
+<p>TCP Header 中的接收窗口用于 Flow Control：</p>
+<pre><code class="language-text">receiver advertised window
+→ 接收方缓冲区还能接收多少
+</code></pre>
+<p>发送方还维护 Congestion Window：</p>
+<pre><code class="language-text">cwnd
+→ 网络目前大概能承受多少未确认数据
+</code></pre>
+<p>实际可发送的未确认数据受两者较小值等条件约束：</p>
+<pre><code class="language-text">send limit ≈ min(rwnd, cwnd)
+</code></pre>
+<p>Flow Control 保护接收方，Congestion Control 保护网络。两者都影响 HTTP 数据何时被放到线上。</p>
+<h3 id="section-tcp-checksum-检查什么">TCP Checksum 检查什么</h3>
+<p>TCP Checksum 覆盖 TCP Header、Payload，以及来自 IP 层的伪首部信息。它能检测传输中的许多比特错误，但不是密码学完整性保护，不能抵御主动篡改。</p>
+<p>HTTPS 的 TLS AEAD 会提供更强的认证加密，但 TCP Checksum 仍参与传输层错误检测。</p>
+<h2 id="section-mss-决定-tcp-一段通常装多少-payload">MSS 决定 TCP 一段通常装多少 Payload</h2>
+<p>常见 Ethernet MTU 是 1500 Bytes。若没有额外 Option：</p>
+<pre><code class="language-text">1500 IP packet
+- 20 IPv4 header
+- 20 TCP header
+= 1460 TCP payload
+</code></pre>
+<p>所以常见 TCP MSS 为 1460，但这不是全网常量：</p>
+<ul>
+<li>IPv6 基础头为 40 Bytes；</li>
+<li>TCP Timestamp 等 Option 增加 Header；</li>
+<li>PPPoE、VPN、VXLAN 等封装降低可用空间；</li>
+<li>Jumbo Frame 的 MTU 更大；</li>
+<li>Path MTU 由整条路径上最小可承载单元限制。</li>
+</ul>
+<p>MSS 通常在 SYN 中协商，表示对方希望收到的最大 TCP Payload 大小。TCP 尽量按 MSS 分段，避免依赖 IP Fragmentation。</p>
+<p>一份 10KiB HTTP Body 不会对应“一个网络包”：</p>
+<pre><code class="language-text">HTTP body
+→ multiple TLS records, possibly
+→ multiple TCP segments
+→ multiple IP packets
+→ multiple link frames
+</code></pre>
+<p>这些边界不保证一一对齐。</p>
+<h2 id="section-ip-增加端到端主机与路由信息">IP 增加端到端主机与路由信息</h2>
+<p>TCP Segment 被放入 IP Packet。IPv4 Header 的关键字段包括：</p>
+<pre><code class="language-text">Version
+Internet Header Length
+Total Length
+Identification / Flags / Fragment Offset
+TTL
+Protocol
+Header Checksum
+Source IP
+Destination IP
+Options, if any
+</code></pre>
+<h3 id="section-source-与-destination-描述端到端地址">Source 与 Destination 描述端到端地址</h3>
+<p>例如：</p>
+<pre><code class="language-text">Source IP:      192.168.1.20
+Destination IP: 203.0.113.10
+Protocol:       6 (TCP)
+</code></pre>
+<p>目标 IP 让沿途路由器决定下一跳；<code>Protocol=6</code> 让目标主机知道 IP Payload 应交给 TCP。UDP 的 IPv4 Protocol Number 是 17。</p>
+<p>经过 NAT 时，Source IP 和端口可能被改写，所以“端到端保持不变”要以没有 NAT、代理或隧道为前提。NAT 设备还必须同步更新相关 Checksum。</p>
+<h3 id="section-ttl-防止包永久循环">TTL 防止包永久循环</h3>
+<p>每经过一个三层路由器，IPv4 TTL 至少减一：</p>
+<pre><code class="language-text">64 → 63 → 62 → ...
+</code></pre>
+<p>减到零时，路由器丢弃包，通常返回 ICMP Time Exceeded。<code>traceroute</code> 正是利用逐步增加 TTL/Hop Limit 来发现沿途路由节点。</p>
+<p>TTL 不是“以秒计的精确生存时间”。在现代转发中，它实际表现为 Hop Count 上限。IPv6 直接把字段命名为 Hop Limit。</p>
+<h3 id="section-ip-不提供-tcp-那样的可靠性">IP 不提供 TCP 那样的可靠性</h3>
+<p>IP 层尽力转发 Datagram，但允许：</p>
+<ul>
+<li>丢失；</li>
+<li>重复；</li>
+<li>乱序；</li>
+<li>路径变化。</li>
+</ul>
+<p>IPv4 Header Checksum 只覆盖 IPv4 Header，不覆盖 Payload；IPv6 基础头没有 Header Checksum。可靠、有序字节流由 TCP 在端系统实现，而不是要求每台路由器维护每条 TCP 连接。</p>
+<h2 id="section-路由表决定下一跳不决定完整路径">路由表决定下一跳，不决定完整路径</h2>
+<p>本机拿目标 IP 查询路由表，执行最长前缀匹配：</p>
+<pre><code class="language-text">203.0.113.10
+→ default route 0.0.0.0/0
+→ gateway 192.168.1.1
+→ interface en0
+</code></pre>
+<p>内核在当前时刻只需要知道：</p>
+<pre><code class="language-text">从哪个接口发出
+交给哪个下一跳
+选择哪个源 IP
+</code></pre>
+<p>它通常不知道 Internet 上之后的完整路径。每台路由器独立重复路由查找。</p>
+<p>若目标是同一子网：</p>
+<pre><code class="language-text">192.168.1.50 is on-link
+→ next hop is destination itself
+</code></pre>
+<p>若目标在远端：</p>
+<pre><code class="language-text">203.0.113.10 is remote
+→ next hop is gateway 192.168.1.1
+</code></pre>
+<h2 id="section-ethernet-增加当前链路的交付信息">Ethernet 增加当前链路的交付信息</h2>
+<p>IP Packet 进入 Ethernet Frame。常见字段：</p>
+<pre><code class="language-text">Destination MAC
+Source MAC
+EtherType
+Payload
+Frame Check Sequence
+</code></pre>
+<p>示意：</p>
+<pre><code class="language-text">Dst MAC:  router&#39;s MAC
+Src MAC:  client&#39;s NIC MAC
+EtherType: 0x0800 (IPv4)
+Payload:   IPv4 packet
+FCS:       link-level error detection
+</code></pre>
+<p>如果服务器远在 Internet，Destination MAC 为什么是路由器，而不是服务器？</p>
+<p>因为 MAC 地址只在当前二层广播域内用于交付。客户端不能把本地 Ethernet Frame 直接横跨所有路由器送到服务器。它只把帧交给当前下一跳。</p>
+<pre><code class="language-text">IP destination: 203.0.113.10
+MAC destination: 192.168.1.1 对应的网关 MAC
+</code></pre>
+<p>内核通过 ARP 获得 IPv4 下一跳 MAC：</p>
+<pre><code class="language-text">ARP Request:
+Who has 192.168.1.1? Tell 192.168.1.20
+
+ARP Reply:
+192.168.1.1 is at aa:bb:cc:dd:ee:ff
+</code></pre>
+<p>IPv6 使用 ICMPv6 Neighbor Discovery。</p>
+<h3 id="section-fcs-与上层-checksum-为什么并存">FCS 与上层 Checksum 为什么并存</h3>
+<p>Ethernet FCS 检测当前链路上 Frame 的错误。路由器收到后会移除旧 Frame，并为下一链路生成新 Frame 和新 FCS。</p>
+<p>TCP Checksum 是端到端传输层校验的一部分。不同层的校验覆盖范围和信任边界不同，所以不是简单重复：</p>
+<pre><code class="language-text">Ethernet FCS: one link
+IPv4 Header Checksum: current IPv4 header
+TCP Checksum: end-to-end TCP segment + pseudo-header
+TLS AEAD tag: cryptographic integrity and authenticity
+</code></pre>
+<h2 id="section-一个包在离开主机前长什么样">一个包在离开主机前长什么样</h2>
+<p>假设 TCP Payload 是请求的一部分：</p>
+<pre><code class="language-text">GET /users/42 HTTP/1.1\r\n...
+</code></pre>
+<p>逻辑封装为：</p>
+<pre><code class="language-text">Ethernet Frame
+├─ Ethernet Header
+│  ├─ next-hop destination MAC
+│  ├─ local source MAC
+│  └─ EtherType = IPv4
+├─ IPv4 Packet
+│  ├─ source IP
+│  ├─ destination IP
+│  ├─ TTL
+│  └─ Protocol = TCP
+├─ TCP Segment
+│  ├─ source port
+│  ├─ destination port
+│  ├─ sequence / acknowledgment
+│  ├─ flags / window / options
+│  └─ checksum
+├─ HTTP bytes
+└─ Ethernet FCS
+</code></pre>
+<p>术语随层变化：</p>
+<pre><code class="language-text">HTTP message
+TCP segment
+IP packet / datagram
+Ethernet frame
+physical bits / symbols
+</code></pre>
+<p>日常常把它们都叫“包”，沟通方便，但调试时最好明确正在看哪一层。</p>
+<h2 id="section-nic-如何把-frame-变成物理信号">NIC 如何把 Frame 变成物理信号</h2>
+<p>内核网络栈不会由 CPU 逐字节把 Frame 推到网线上。典型发送路径使用环形队列与 DMA：</p>
+<pre><code class="language-text">1. Kernel prepares packet buffers
+2. Driver fills TX descriptors
+3. NIC reads descriptors
+4. NIC DMA reads packet data from RAM
+5. NIC performs configured offloads
+6. PHY transmits electrical / optical / radio symbols
+7. NIC reports completion
+</code></pre>
+<p>现代 NIC 可能承担：</p>
+<ul>
+<li>TCP Segmentation Offload；</li>
+<li>Checksum Offload；</li>
+<li>VLAN Tag insertion；</li>
+<li>多队列发送；</li>
+<li>Traffic Shaping；</li>
+<li>部分加密或隧道 Offload。</li>
+</ul>
+<p>因此在发送主机上抓包时，可能看到一个大于 MTU 的“包”或未计算完成的 Checksum。这不一定是线上真的发送了非法 Frame，而可能是抓包点位于软件分段或硬件校验之前。</p>
+<h2 id="section-switch-与-router-做的事不同">Switch 与 Router 做的事不同</h2>
+<h3 id="section-二层交换机">二层交换机</h3>
+<p>交换机主要根据 Destination MAC 转发 Frame。它学习 Source MAC 出现在哪个端口，形成 MAC Address Table：</p>
+<pre><code class="language-text">aa:bb:... → port 3
+cc:dd:... → port 7
+</code></pre>
+<p>未知单播、广播等流量可能在 VLAN 内 Flood。交换机通常不因普通二层转发而修改 IP TTL。</p>
+<h3 id="section-三层路由器">三层路由器</h3>
+<p>路由器接收发给自己的链路层 Frame：</p>
+<pre><code class="language-text">remove incoming Ethernet header/trailer
+→ inspect IP destination
+→ decrement TTL
+→ route lookup
+→ possibly apply ACL/NAT/QoS
+→ create new outgoing link frame
+</code></pre>
+<p>下一跳 Frame 的 MAC 地址会变化：</p>
+<pre><code class="language-text">Client → Home Router:
+  src MAC = client
+  dst MAC = home router
+
+Router → ISP next hop:
+  src MAC = router outgoing interface
+  dst MAC = ISP next hop
+</code></pre>
+<p>原始 HTTP 字节通常不会被普通 IP 路由器理解或重写，但代理、防火墙、NAT、中间盒和 TLS 终止设备可能处理更高层。</p>
+<h2 id="section-internet-不是一台巨型路由器">Internet 不是一台巨型路由器</h2>
+<p>Internet 由多个 Autonomous System 互联：</p>
+<pre><code class="language-text">home network
+→ access ISP
+→ transit / peering
+→ destination network
+→ data-center edge
+</code></pre>
+<p>BGP 在 AS 之间传播“哪些 IP Prefix 可通过哪里到达”。每个网络根据策略选择路径，策略不只考虑地理最短距离。</p>
+<p>单个 IP Packet 逐跳转发。沿途设备可能：</p>
+<ul>
+<li>排队；</li>
+<li>因拥塞丢弃；</li>
+<li>改选其他等价路径；</li>
+<li>执行 NAT 或防火墙策略；</li>
+<li>进入 MPLS、GRE、IPsec、VXLAN 等封装；</li>
+<li>因 MTU 问题返回 ICMP。</li>
+</ul>
+<p>TCP 从 ACK、丢包和 RTT 变化推断网络状态，并调整发送速率。HTTP 应用不需要直接控制每台路由器。</p>
+<h2 id="section-服务器端发生逐层解封装">服务器端发生逐层解封装</h2>
+<p>服务器 NIC 收到 Frame：</p>
+<pre><code class="language-text">physical signal
+→ NIC validates frame
+→ DMA to receive buffer
+→ driver / polling
+→ Ethernet layer
+→ IP layer
+→ TCP layer
+→ Socket receive queue
+→ application read()
+</code></pre>
+<p>每一层根据自己的字段决定下一步：</p>
+<pre><code class="language-text">EtherType 0x0800  → IPv4 handler
+IP Protocol 6     → TCP handler
+destination tuple → matching TCP socket
+TCP sequence      → reorder into byte stream
+HTTP parser       → request line, headers, body
+</code></pre>
+<p>如果目标端口没有监听 Socket，主机通常回复 TCP RST。若防火墙静默丢弃，客户端可能只看到超时。两者都表现为“访问失败”，但协议证据不同。</p>
+<p>已建立连接的数据到达后，TCP 先按序放入 Socket 接收缓冲区，再唤醒或通知应用。应用调用 <code>read()</code> 得到的是字节流，不会直接看到 IP Header 或 Ethernet Header。</p>
+<h2 id="section-服务器应用如何找出完整-http-请求">服务器应用如何找出完整 HTTP 请求</h2>
+<p>TCP 不保存消息边界，所以 HTTP Parser 必须自己识别：</p>
+<pre><code class="language-text">request line ending
+headers ending
+body length or transfer coding
+</code></pre>
+<p>一次 <code>read()</code> 可能只得到：</p>
+<pre><code class="language-text">GET /users/
+</code></pre>
+<p>下一次才得到：</p>
+<pre><code class="language-text">42 HTTP/1.1\r\nHost: ...
+</code></pre>
+<p>健壮的服务器不能假设一次读取等于一次请求。它要维护 Parser State，并限制请求行、Header 数量和 Body 大小，防止 Slowloris、内存耗尽和解析歧义。</p>
+<p>HTTP/1.1 Keep-Alive 允许同一 TCP 连接承载多个顺序请求。HTTP/2 通过 Stream ID 在一个连接中多路复用。HTTP/3 的流由 QUIC 提供。</p>
+<h2 id="section-https-在哪里插入">HTTPS 在哪里插入</h2>
+<p>真实 Web 流量通常是：</p>
+<pre><code class="language-text">HTTP
+↓
+TLS
+↓
+TCP
+↓
+IP
+↓
+Link
+</code></pre>
+<p>HTTP/1.1 文本或 HTTP/2 Frame 先被 TLS 封装成 Record 并加密。网络中间设备能观察的通常包括：</p>
+<ul>
+<li>IP 地址和端口；</li>
+<li>包长与时序；</li>
+<li>一部分握手元数据，具体取决于 TLS 版本和 ECH；</li>
+<li>不能直接读取加密后的 HTTP Path、Header 与 Body。</li>
+</ul>
+<p>TLS Record 边界也不等于 TCP Segment 边界：</p>
+<pre><code class="language-text">one TLS record → multiple TCP segments
+multiple small TLS records → one observed packet after coalescing
+</code></pre>
+<p>HTTP/3 的层次不同：</p>
+<pre><code class="language-text">HTTP/3 Frames
+→ QUIC Streams + TLS protection
+→ UDP Datagrams
+→ IP Packets
+→ Link Frames
+</code></pre>
+<p>此时 TCP Header 不存在，可靠性、拥塞控制和流复用由 QUIC 在端系统用户态或内核辅助下实现。</p>
+<h2 id="section-封装不是简单俄罗斯套娃">封装不是简单俄罗斯套娃</h2>
+<p>教科书图很有用，但真实系统还有几个重要例外。</p>
+<h3 id="section-分段与重组改变边界">分段与重组改变边界</h3>
+<p>一个 HTTP Message 可跨多个 TCP Segment。一个应用 <code>write()</code> 也不对应固定 Segment。接收侧最终只还原有序字节流。</p>
+<h3 id="section-offload-改变观察点">Offload 改变观察点</h3>
+<p>抓包工具可能在 NIC 分段前或合并后看到数据，因此抓包里的大小、Checksum 和包数不一定等于物理线路。</p>
+<h3 id="section-隧道会再次封装">隧道会再次封装</h3>
+<p>VPN 或数据中心 Overlay 可能形成：</p>
+<pre><code class="language-text">Outer Ethernet
+└─ Outer IP
+   └─ UDP / tunnel header
+      └─ Inner Ethernet
+         └─ Inner IP
+            └─ TCP
+               └─ HTTP
+</code></pre>
+<p>“IP Header 只有一个”并不总成立。</p>
+<h3 id="section-loopback-可能没有-ethernet">Loopback 可能没有 Ethernet</h3>
+<p>请求 <code>127.0.0.1</code> 时，数据可在内核 Loopback 路径中交付，不经过物理 NIC 和普通 Ethernet 链路。用本地抓包理解 TCP/HTTP 很方便，但不能据此推断物理网卡路径。</p>
+<h2 id="section-用实验看见各层">用实验看见各层</h2>
+<p>为了能看到 HTTP 明文，可在自己的机器上使用本地 HTTP 服务。</p>
+<p>启动服务：</p>
+<pre><code class="language-bash">python3 -m http.server 8080
+</code></pre>
+<p>发送请求：</p>
+<pre><code class="language-bash">curl -v http://127.0.0.1:8080/
+</code></pre>
+<p>抓包：</p>
+<p>Linux：</p>
+<pre><code class="language-bash">sudo tcpdump -i lo -nn -A &#39;tcp port 8080&#39;
+</code></pre>
+<p>macOS：</p>
+<pre><code class="language-bash">sudo tcpdump -i lo0 -nn -A &#39;tcp port 8080&#39;
+</code></pre>
+<p><code>-A</code> 会把可打印 Payload 显示为文本，可观察：</p>
+<pre><code class="language-text">GET / HTTP/1.1
+Host: 127.0.0.1:8080
+User-Agent: curl/...
+Accept: */*
+</code></pre>
+<p>Loopback 没有展示真实以太网链路。若要观察局域网 Frame，可对自己控制的远端 HTTP 服务，在实际接口抓取并显示链路头：</p>
+<pre><code class="language-bash">sudo tcpdump -i en0 -nn -e -X &#39;host &lt;server-ip&gt; and tcp port 8080&#39;
+</code></pre>
+<p>只应抓取有权限分析的流量。</p>
+<h3 id="section-分别观察邻居和路由">分别观察邻居和路由</h3>
+<p>Linux：</p>
+<pre><code class="language-bash">ip route get &lt;server-ip&gt;
+ip neigh show
+</code></pre>
+<p>macOS：</p>
+<pre><code class="language-bash">route -n get &lt;server-ip&gt;
+arp -an
+</code></pre>
+<h3 id="section-观察路径">观察路径</h3>
+<pre><code class="language-bash">traceroute &lt;server-ip&gt;
+</code></pre>
+<p>某些节点不回复或被防火墙过滤时会显示 <code>*</code>。这不等于数据无法经过该节点；它只表示没有收到匹配的探测响应。</p>
+<h2 id="section-每层究竟增加了什么">每层究竟增加了什么</h2>
+<div class="table-scroll"><table>
+<thead>
+<tr>
+<th>层</th>
+<th>主要增加的信息</th>
+<th>作用范围</th>
+<th>核心问题</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>HTTP</td>
+<td>Method、Target、Header、Body 边界</td>
+<td>Client 与 HTTP Server/Proxy</td>
+<td>要做什么</td>
+</tr>
+<tr>
+<td>TLS</td>
+<td>身份、加密套件、Nonce、认证标签</td>
+<td>TLS 两端</td>
+<td>如何保密且防篡改</td>
+</tr>
+<tr>
+<td>TCP</td>
+<td>Port、Sequence、ACK、Window、Flags</td>
+<td>TCP 两端</td>
+<td>如何交付可靠字节流</td>
+</tr>
+<tr>
+<td>IP</td>
+<td>Source/Destination IP、TTL、上层协议</td>
+<td>跨多个网络</td>
+<td>最终送到哪台主机</td>
+</tr>
+<tr>
+<td>Ethernet</td>
+<td>Source/Destination MAC、EtherType、FCS</td>
+<td>当前二层链路</td>
+<td>下一跳交给谁</td>
+</tr>
+<tr>
+<td>NIC/PHY</td>
+<td>Descriptor、队列与物理编码</td>
+<td>主机到链路</td>
+<td>如何真正发送比特</td>
+</tr>
+</tbody></table></div>
+<p>“上层依赖下层”不代表下层知道上层语义。路由器能转发承载 HTTP 的 IP Packet，却不需要理解 <code>GET</code>；TCP 能可靠传输 TLS 密文，却不知道里面是 JSON 还是图片。</p>
+<h2 id="section-最终答案">最终答案</h2>
+<p>一个 HTTP 请求跑到服务器，不是同一个对象原封不动地穿过六层。应用的 HTTP 字节被 TCP 编入一个有序字节流，被 IP 放进可路由的数据报，再被当前链路封装成 Frame。NIC 把 Frame 变成物理信号；每台路由器移除入站链路封装、查询目标 IP，再为下一跳建立新的链路封装。</p>
+<p>到达服务器后，过程反向进行：网卡收帧，IP 找到 TCP，TCP按序重组字节并找到 Socket，HTTP Parser 才重新看到请求的 Method、Path、Header 与 Body。</p>
+<p>最关键的边界是：</p>
+<pre><code class="language-text">HTTP 负责语义
+TCP 负责端到端字节流
+IP 负责跨网络寻址
+Ethernet / Wi-Fi 负责当前链路交付
+NIC 负责物理收发
+Router 负责逐跳选择下一段路径
+</code></pre>
+<p>每一层都增加恰好足够本层完成任务的信息。所谓“网络请求”，正是这些独立机制在同一批字节上的协作结果。</p>
+
+    </article>
+  </main>
+
+  <footer class="site-footer article-footer">
+    <a href="../sections/computer-systems.html">计算机底层 / 网络请求链路</a>
+    <a href="https://github.com/yjd953/yjd953/blob/main/posts/http-request-network-stack.md">View source ↗</a>
+  </footer>
+  <script src="../assets/site.js" defer></script>
+</body>
+</html>

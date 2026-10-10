@@ -1,0 +1,223 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="从程序如何运行开始，逐步进入操作系统、网络、编译器与数据库内核。">
+  <meta name="theme-color" content="#f1f1ee">
+  <title>计算机底层 — Dale Yang</title>
+  <link rel="stylesheet" href="../assets/site.css">
+</head>
+<body class="section-page">
+  <div class="reading-progress" id="readingProgress" aria-hidden="true"></div>
+
+  <header class="site-header">
+    <a class="wordmark" href="../" aria-label="Dale Yang home">DY<span>.</span></a>
+    <nav aria-label="Primary">
+      <a href="../">All modules</a>
+      <a href="https://github.com/yjd953">GitHub</a>
+    </nav>
+  </header>
+
+  <main class="section-layout">
+    <header class="section-masthead">
+      <a class="back-link" href="../">← All modules</a>
+      <p class="kicker">02 / Computer systems</p>
+      <h1>计算机底层<span>.</span></h1>
+      <p>从程序如何运行开始，逐步进入操作系统、网络、编译器与数据库内核。</p>
+    </header>
+
+      <section class="section-group" aria-labelledby="group-代码如何运行">
+        <div class="section-label">
+          <h2 id="group-代码如何运行">代码如何运行</h2>
+          <span>04 notes</span>
+        </div>
+        <div class="note-list">
+          <a class="note-row" href="../notes/program-startup.html">
+            <span class="note-number">01</span>
+            <span class="note-copy">
+              <span class="note-meta">Program loading / ZH / 从 Shell 到 main</span>
+              <strong>一个程序启动的时候，操作系统到底做了什么？</strong>
+              <span class="note-description">从 ./app 追踪 fork、exec、ELF、Loader、虚拟内存、动态链接，直到 main 真正执行。</span>
+            </span>
+            <span class="note-arrow" aria-hidden="true">↗</span>
+          </a>
+          <a class="note-row" href="../notes/cpu-execution.html">
+            <span class="note-number">02</span>
+            <span class="note-copy">
+              <span class="note-meta">CPU / ZH / 指令与流水线</span>
+              <strong>CPU 到底在执行什么？</strong>
+              <span class="note-description">从表达式进入汇编和机器码，解释寄存器、ALU、Pipeline 与 Cache 如何协作。</span>
+            </span>
+            <span class="note-arrow" aria-hidden="true">↗</span>
+          </a>
+          <a class="note-row" href="../notes/go-source-to-machine-code.html">
+            <span class="note-number">03</span>
+            <span class="note-copy">
+              <span class="note-meta">Compiler / ZH / a += b</span>
+              <strong>一行 Go 代码是怎么变成 CPU 指令的？</strong>
+              <span class="note-description">沿 Go Source、AST、类型检查、SSA IR、汇编和机器码逐层追踪一条加法语句。</span>
+            </span>
+            <span class="note-arrow" aria-hidden="true">↗</span>
+          </a>
+          <a class="note-row" href="../notes/compiler-ir.html">
+            <span class="note-number">04</span>
+            <span class="note-copy">
+              <span class="note-meta">Compiler / ZH / 中间表示</span>
+              <strong>编译器为什么需要 IR？</strong>
+              <span class="note-description">从多语言、多架构与优化 Pass 出发，理解 IR 如何解耦源语言和目标 CPU。</span>
+            </span>
+            <span class="note-arrow" aria-hidden="true">↗</span>
+          </a>
+        </div>
+      </section>
+      <section class="section-group" aria-labelledby="group-进程线程与内存">
+        <div class="section-label">
+          <h2 id="group-进程线程与内存">进程、线程与内存</h2>
+          <span>06 notes</span>
+        </div>
+        <div class="note-list">
+          <a class="note-row" href="../notes/process-explained.html">
+            <span class="note-number">05</span>
+            <span class="note-copy">
+              <span class="note-meta">Process / ZH / 运行时容器</span>
+              <strong>进程到底是什么？</strong>
+              <span class="note-description">从可执行文件到地址空间、文件描述符、栈、堆与 PID，解释程序为何不再只是文件。</span>
+            </span>
+            <span class="note-arrow" aria-hidden="true">↗</span>
+          </a>
+          <a class="note-row" href="../notes/thread-explained.html">
+            <span class="note-number">06</span>
+            <span class="note-copy">
+              <span class="note-meta">Thread / ZH / 调度实体</span>
+              <strong>线程到底是什么？</strong>
+              <span class="note-description">连接 Thread、CPU Core、Scheduler、时间片、抢占与上下文切换。</span>
+            </span>
+            <span class="note-arrow" aria-hidden="true">↗</span>
+          </a>
+          <a class="note-row" href="../notes/goroutine-vs-thread.html">
+            <span class="note-number">07</span>
+            <span class="note-copy">
+              <span class="note-meta">Concurrency / ZH / Goroutine 实验</span>
+              <strong>协程到底比线程轻在哪里？</strong>
+              <span class="note-description">用 Go 代码与可复现实验比较栈、调度、切换成本和内存占用，而不是只说轻量。</span>
+            </span>
+            <span class="note-arrow" aria-hidden="true">↗</span>
+          </a>
+          <a class="note-row" href="../notes/cpu-cache.html">
+            <span class="note-number">08</span>
+            <span class="note-copy">
+              <span class="note-meta">Memory hierarchy / ZH / 距离与延迟</span>
+              <strong>CPU 为什么需要 Cache？</strong>
+              <span class="note-description">从 CPU 与内存的速度差出发，建立 Register、Cache、RAM、SSD 到网络的延迟层次。</span>
+            </span>
+            <span class="note-arrow" aria-hidden="true">↗</span>
+          </a>
+          <a class="note-row" href="../notes/malloc-internals.html">
+            <span class="note-number">09</span>
+            <span class="note-copy">
+              <span class="note-meta">Memory allocation / ZH / 1024 字节</span>
+              <strong>malloc 到底干了什么？</strong>
+              <span class="note-description">追踪 Allocator、Heap、brk、mmap、虚拟页与物理页，解释分配为何不等于占用。</span>
+            </span>
+            <span class="note-arrow" aria-hidden="true">↗</span>
+          </a>
+          <a class="note-row" href="../notes/virtual-memory-rss-vss.html">
+            <span class="note-number">10</span>
+            <span class="note-copy">
+              <span class="note-meta">Virtual memory / ZH / RSS 与 VSS</span>
+              <strong>为什么一个 100MB 的程序，不一定真的占了 100MB 内存？</strong>
+              <span class="note-description">通过进程观测拆解虚拟地址、驻留集、按需分页、mmap 与 Copy-on-Write。</span>
+            </span>
+            <span class="note-arrow" aria-hidden="true">↗</span>
+          </a>
+        </div>
+      </section>
+      <section class="section-group" aria-labelledby="group-网络请求链路">
+        <div class="section-label">
+          <h2 id="group-网络请求链路">网络请求链路</h2>
+          <span>03 notes</span>
+        </div>
+        <div class="note-list">
+          <a class="note-row" href="../notes/url-request-journey.html">
+            <span class="note-number">11</span>
+            <span class="note-copy">
+              <span class="note-meta">Networking / ZH / 端到端链路</span>
+              <strong>输入一个 URL 后，计算机到底发生了什么？</strong>
+              <span class="note-description">从 https://example.com 追踪 DNS、Socket、TCP、TLS、HTTP、内核、网卡、路由器和服务器。</span>
+            </span>
+            <span class="note-arrow" aria-hidden="true">↗</span>
+          </a>
+          <a class="note-row" href="../notes/tcp-three-way-handshake.html">
+            <span class="note-number">12</span>
+            <span class="note-copy">
+              <span class="note-meta">TCP / ZH / 证明两次不够</span>
+              <strong>TCP 为什么需要三次握手？</strong>
+              <span class="note-description">从双方收发能力、初始序列号和网络旧报文证明第三次确认的必要性。</span>
+            </span>
+            <span class="note-arrow" aria-hidden="true">↗</span>
+          </a>
+          <a class="note-row" href="../notes/http-request-network-stack.html">
+            <span class="note-number">13</span>
+            <span class="note-copy">
+              <span class="note-meta">Network stack / ZH / 逐层封装</span>
+              <strong>一个 HTTP 请求是怎么跑到服务器的？</strong>
+              <span class="note-description">沿 HTTP、TCP、IP、Ethernet、NIC、Router 与 Internet 解释每一层增加的信息。</span>
+            </span>
+            <span class="note-arrow" aria-hidden="true">↗</span>
+          </a>
+        </div>
+      </section>
+      <section class="section-group" aria-labelledby="group-存储与数据库">
+        <div class="section-label">
+          <h2 id="group-存储与数据库">存储与数据库</h2>
+          <span>04 notes</span>
+        </div>
+        <div class="note-list">
+          <a class="note-row" href="../notes/database-write-path.html">
+            <span class="note-number">14</span>
+            <span class="note-copy">
+              <span class="note-meta">Database storage / ZH / INSERT 路径</span>
+              <strong>数据库为什么不能直接把数据写进硬盘？</strong>
+              <span class="note-description">追踪 Buffer Pool、WAL、Page Cache、Filesystem、Block Device 与 SSD 的分层写入。</span>
+            </span>
+            <span class="note-arrow" aria-hidden="true">↗</span>
+          </a>
+          <a class="note-row" href="../notes/database-wal.html">
+            <span class="note-number">15</span>
+            <span class="note-copy">
+              <span class="note-meta">Database recovery / ZH / 断电实验</span>
+              <strong>数据库为什么需要 WAL？</strong>
+              <span class="note-description">设计写入后断电实验，连接 Log、Flush、Commit、Checkpoint 与崩溃恢复。</span>
+            </span>
+            <span class="note-arrow" aria-hidden="true">↗</span>
+          </a>
+          <a class="note-row" href="../notes/ssd-internals.html">
+            <span class="note-number">16</span>
+            <span class="note-copy">
+              <span class="note-meta">Storage / ZH / 从 write 到 NAND</span>
+              <strong>SSD 到底是怎么工作的？</strong>
+              <span class="note-description">沿文件系统、块层、Controller、FTL 与 NAND 追踪写入，解释擦除、映射和写放大。</span>
+            </span>
+            <span class="note-arrow" aria-hidden="true">↗</span>
+          </a>
+          <a class="note-row" href="../notes/file-write-path.html">
+            <span class="note-number">17</span>
+            <span class="note-copy">
+              <span class="note-meta">Filesystem / ZH / write("hello")</span>
+              <strong>一个文件到底是怎么存进硬盘的？</strong>
+              <span class="note-description">从文件描述符、系统调用、Inode、Page Cache 和 Block 一路走到 SSD。</span>
+            </span>
+            <span class="note-arrow" aria-hidden="true">↗</span>
+          </a>
+        </div>
+      </section>
+  </main>
+
+  <footer class="site-footer">
+    <a href="../">Dale Yang / Engineering paths</a>
+    <span>17 篇文章</span>
+  </footer>
+  <script src="../assets/site.js" defer></script>
+</body>
+</html>

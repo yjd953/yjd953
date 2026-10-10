@@ -1,0 +1,596 @@
+# 输入一个 URL 后，计算机到底发生了什么？
+
+在地址栏输入：
+
+```text
+https://example.com
+```
+
+按下回车后，屏幕很快出现网页。看起来像是浏览器“访问了一个地址”，但这句话隐藏了十几套彼此独立的机制：
+
+```text
+URL 解析
+→ 浏览器安全策略与缓存
+→ DNS 名称解析
+→ 创建 Socket
+→ 路由选择与邻居解析
+→ TCP 建连
+→ TLS 握手
+→ HTTP 请求
+→ 网卡发送
+→ 交换机、路由器与 Internet 转发
+→ 服务器内核收包
+→ 反向代理与应用处理
+→ HTTP 响应
+→ 浏览器解析、布局与绘制
+```
+
+这不是一条固定不变的流水线。DNS 可能走 DoH，连接可能复用，HTTP/3 不使用 TCP，目标可能是 CDN，响应可能直接来自缓存。理解这条链路的关键，不是背诵步骤，而是知道每一层在解决什么问题，以及它把什么状态交给下一层。
+
+## 第一步不是联网，而是解析 URL
+
+浏览器先把输入解释成 URL：
+
+```text
+https://example.com
+│       │           │
+scheme  host        path 默认为 /
+```
+
+完整 URL 还可能包含：
+
+```text
+https://user:pass@example.com:443/a/b?q=1#chapter
+└─scheme              └host  └port └path └query └fragment
+```
+
+这里有几个容易混淆的边界：
+
+- `https` 决定默认端口、连接协议与安全要求；
+- `example.com` 是逻辑主机名，不是可以直接交给网卡的目标；
+- `/` 是发给 HTTP 服务器的路径；
+- `#chapter` 是 Fragment，只供浏览器定位文档片段，通常不会放进 HTTP 请求；
+- 用户在地址栏输入的文本也可能被判定为搜索词，而不是 URL。
+
+浏览器还会做规范化，例如处理国际化域名、转义非法字符、补全路径。对已知启用 HSTS 的域名，即使输入 `http://`，浏览器也可能在产生明文 HTTP 请求前直接升级为 HTTPS。
+
+## 浏览器会先问：真的需要发请求吗
+
+网络并不总是第一选择。浏览器可能依次检查：
+
+- Service Worker 是否拦截本次 Fetch；
+- Memory Cache 中是否已有可直接使用的响应；
+- HTTP Cache 中的响应是否仍然 Fresh；
+- 是否已有到该 Origin 的可复用连接；
+- 是否存在永久重定向、HSTS 或 Alt-Svc 信息；
+- 当前页面的 CSP、混合内容规则和权限策略是否允许请求。
+
+如果缓存命中，页面资源甚至可以不离开本机。若缓存已过期，浏览器也可能发送条件请求：
+
+```http
+GET /app.js HTTP/1.1
+Host: example.com
+If-None-Match: "v17"
+```
+
+服务器返回 `304 Not Modified` 后，浏览器复用本地响应体。这仍然发生了网络往返，只是没有重传实体内容。
+
+下面假设没有可复用连接，也没有可直接使用的缓存。
+
+## DNS：把名字解析成可路由地址
+
+IP 网络按 IP 地址转发，不能直接按 `example.com` 转发。因此浏览器需要得到一个或多个 IPv4/IPv6 地址。
+
+应用通常不会自己从根 DNS 服务器查起，而是调用系统解析接口。Linux 上常见入口是 `getaddrinfo()`：
+
+```text
+Browser
+→ browser DNS/cache layer
+→ getaddrinfo()
+→ libc / system resolver
+→ configured name service sources
+```
+
+“名称解析”等于 DNS 也不完全准确。系统配置可能先查询：
+
+- 浏览器自己的 DNS Cache；
+- 操作系统缓存；
+- `/etc/hosts`；
+- mDNS；
+- 企业目录服务；
+- 最后才是 DNS Resolver。
+
+Linux 的 `/etc/nsswitch.conf` 可以决定 `hosts` 的查询来源和顺序。macOS、Windows 与使用 `systemd-resolved` 的 Linux 发行版有各自实现。
+
+### Stub Resolver 不负责完整递归
+
+本机一般只有 Stub Resolver。它把问题交给配置好的递归解析器：
+
+```text
+Q: example.com 的 A / AAAA 记录是什么？
+```
+
+递归解析器若无缓存，会沿 DNS 委派关系寻找答案：
+
+```text
+Root
+→ .com TLD
+→ example.com Authoritative DNS
+→ A / AAAA / CNAME 等记录
+```
+
+严格说，根和 TLD 服务器通常返回“下一步该问谁”的 Referral，不会替客户端完成递归。
+
+响应中的 TTL 决定记录可缓存多久。负面结果也可缓存，所以“刚改完 DNS 为什么还没生效”通常与各层缓存和 TTL 有关。
+
+### DNS 不等于 UDP 53
+
+传统 DNS 常先用 UDP 53，但以下路径都可能出现：
+
+- 响应过大或被截断后切换到 TCP；
+- DNS over TLS 使用 TLS 通道；
+- DNS over HTTPS 把查询封装在 HTTPS 中；
+- DNS over QUIC 使用 QUIC；
+- 企业代理或 VPN 接管名称解析。
+
+浏览器还可能并行查询 A 与 AAAA，并使用类似 Happy Eyeballs 的策略选择能更快成功的 IPv6 或 IPv4 路径。最终结果不是“这个域名唯一对应一个 IP”，而可能是一组候选地址：
+
+```text
+example.com
+├─ 93.184.216.34
+└─ 2606:2800:220:1:248:1893:25c8:1946
+```
+
+实际地址会随 DNS 配置、CDN、地理位置和时间变化，这里只用于说明。
+
+## Socket：应用与内核网络栈的接口
+
+得到目标地址后，浏览器通过 Socket API 请求内核建立通信端点。以 IPv4 TCP 为例，概念上类似：
+
+```c
+int fd = socket(AF_INET, SOCK_STREAM, 0);
+connect(fd, &server_addr, sizeof(server_addr));
+```
+
+`socket()` 返回一个文件描述符。它不是“网络连接本身”，而是进程引用内核 Socket 对象的句柄。内核对象会保存：
+
+- 本地与远端 IP；
+- 本地与远端端口；
+- TCP 状态；
+- 发送与接收缓冲区；
+- 序列号和确认号；
+- 拥塞控制状态；
+- 超时与重传计时器。
+
+当应用没有显式绑定本地端口时，内核通常选择一个临时端口。连接可由四元组标识：
+
+```text
+source IP : source port
+destination IP : destination port
+```
+
+例如：
+
+```text
+192.168.1.20:53142 → 93.184.216.34:443
+```
+
+服务器可以在同一个 `443` 端口上同时服务大量连接，因为客户端地址和临时端口不同。
+
+## 内核先决定数据从哪块网卡出去
+
+有目标 IP 不代表已经知道如何发送。内核查询路由表，进行最长前缀匹配：
+
+```text
+destination 93.184.216.34
+→ matching route
+→ next hop 192.168.1.1
+→ interface en0
+→ source address 192.168.1.20
+```
+
+如果目标与本机不在同一子网，二层帧不会直接发给远端服务器，而是先发给默认网关。
+
+但 Ethernet 或 Wi-Fi 帧需要下一跳的链路层地址。IPv4 常通过 ARP 查询：
+
+```text
+Who has 192.168.1.1?
+192.168.1.1 is at aa:bb:cc:dd:ee:ff
+```
+
+IPv6 使用 Neighbor Discovery，而不是 ARP。结果进入邻居缓存，避免每个包都重新广播查询。
+
+这里要区分两个目标：
+
+```text
+IP destination:      远端服务器，跨路由通常保持不变
+Ethernet destination:当前链路的下一跳，逐跳变化
+```
+
+## TCP：先建立一条可靠字节流
+
+HTTPS 在 HTTP/1.1 和 HTTP/2 下通常运行于 TCP。客户端调用 `connect()` 后，内核执行三次握手：
+
+```text
+Client                                 Server
+  | ---- SYN, seq=x --------------------> |
+  | <--- SYN, seq=y, ACK=x+1 ------------ |
+  | ---- ACK=y+1 -----------------------> |
+```
+
+握手建立的不是一根物理线路，而是双方内核中的连接状态：
+
+- 双方同意这组四元组对应一个连接；
+- 双方交换初始序列号；
+- 双方确认彼此的发送和接收路径可用；
+- 协商 MSS、Window Scale、SACK、Timestamp 等选项。
+
+之后 TCP 向应用提供有序、可靠的字节流。底层 IP 包可能丢失、乱序或重复，TCP 用序列号、确认、重传、接收窗口和拥塞控制把这些不可靠性隐藏在流接口后面。
+
+“可靠”不表示永不失败。它表示在连接仍被认为有效时，TCP 要么按序交付字节，要么最终报告错误，而不是悄悄交付一段损坏或乱序的数据。
+
+## TLS：在 TCP 之上建立安全会话
+
+TCP 只解决可靠传输，不验证服务器身份，也不加密内容。浏览器随后启动 TLS 握手。
+
+TLS 1.3 的一次完整握手可概括为：
+
+```text
+ClientHello
+  supported_versions
+  cipher_suites
+  key_share
+  server_name (SNI)
+  ALPN: h2, http/1.1
+                ↓
+ServerHello
+EncryptedExtensions
+Certificate
+CertificateVerify
+Finished
+                ↓
+Client Finished
+```
+
+每个字段都有实际作用：
+
+- `SNI` 告诉同一 IP 上的服务器客户端要访问哪个域名；
+- `ALPN` 协商后续使用 HTTP/2 还是 HTTP/1.1；
+- `key_share` 参与临时会话密钥协商；
+- Certificate 提供公钥和身份声明；
+- CertificateVerify 证明服务器持有证书对应的私钥；
+- Finished 校验此前握手记录未被篡改。
+
+浏览器验证证书时会检查：
+
+- 证书链是否能追溯到受信任根；
+- 域名是否包含在 SAN 中；
+- 当前时间是否在有效期内；
+- 签名是否合法；
+- Key Usage、Basic Constraints 等约束；
+- 吊销状态或浏览器自己的安全策略。
+
+握手后，双方使用协商出的对称密钥保护 Application Data。证书私钥通常不是拿来直接加密整个网页的；它主要参与身份认证与握手，批量数据由高效的对称 AEAD 算法加密。
+
+TLS Session Resumption 可以减少重复握手成本，但它仍要满足浏览器与服务端的安全策略。
+
+## HTTP：终于表达“我要哪个资源”
+
+只有到这里，浏览器才真正发送资源请求。HTTP/1.1 的概念形式是：
+
+```http
+GET / HTTP/1.1
+Host: example.com
+User-Agent: ...
+Accept: text/html,...
+Accept-Encoding: gzip, br
+Connection: keep-alive
+```
+
+这几行解决的是应用语义：
+
+- `GET` 表示读取资源；
+- `/` 表示目标路径；
+- `Host` 让同一 IP/端口承载多个站点；
+- `Accept` 描述客户端可接收的表示；
+- Cookie、Authorization 等 Header 可以携带会话与凭据。
+
+HTTP/2 不按上述纯文本格式在线上传输。它将 Header 压缩为 Header Block，并把数据拆成带 Stream ID 的二进制 Frame，使多个请求可以复用一个连接。
+
+HTTP/3 则运行在 QUIC 上。QUIC 基于 UDP 实现可靠传输与 TLS 1.3，不经过 TCP 握手，流之间也不会因一个 TCP 包丢失而全部发生传输层队头阻塞。因此：
+
+```text
+HTTP/1.1 or HTTP/2: HTTP → TLS → TCP → IP
+HTTP/3:             HTTP → QUIC(TLS included) → UDP → IP
+```
+
+所以“访问 HTTPS 一定会先进行 TCP 三次握手”只对常见的 HTTP/1.1 与 HTTP/2 路径成立。
+
+## 数据离开应用后如何变成包
+
+浏览器把 TLS 密文写入 Socket。之后不是浏览器亲手构造所有网络头，而是内核网络栈继续处理：
+
+```text
+HTTP data
+→ TLS record
+→ TCP segment
+→ IP packet
+→ Ethernet / Wi-Fi frame
+```
+
+每层增加自己的控制信息：
+
+```text
+[Ethernet Header
+  [IP Header
+    [TCP Header
+      [TLS Record
+        [HTTP Data]
+      ]
+    ]
+  ]
+  FCS]
+```
+
+实际发送时，TCP 分段和网卡 Offload 会让抓包观察结果与“教科书上一段一个包”不同。例如 TSO/GSO 允许内核先交给网卡较大的数据块，由网卡再切分；接收侧 GRO/LRO 可能合并多个包后再交给协议栈。
+
+## 网卡怎样真正发送
+
+内核准备好待发送的数据后，通常把描述符放入网卡的发送队列。网卡通过 DMA 从内存读取数据，而不是要求 CPU 把每个字节逐个搬到设备：
+
+```text
+Kernel packet buffer
+→ TX descriptor ring
+→ NIC DMA reads memory
+→ NIC transmits bits / radio symbols
+```
+
+发送完成后，设备更新队列状态，并通过中断或轮询机制通知内核回收资源。高吞吐场景会采用中断合并、NAPI Polling、多队列 RSS 等方式降低每包中断成本。
+
+在有线 Ethernet 上，帧变成电信号或光信号；在 Wi-Fi 上，它经过 802.11 MAC 和物理层编码后变成无线电信号。“网络包”最终不是抽象对象，而是链路上传播的一串物理符号。
+
+## 路由器只关心下一跳
+
+家用网络中，数据先到交换机或无线路由器。路由器会：
+
+1. 校验并移除入站链路层封装；
+2. 检查目标 IP；
+3. 递减 IPv4 TTL 或 IPv6 Hop Limit；
+4. 查路由表选择出接口和下一跳；
+5. 用新链路的二层头重新封装并发送。
+
+沿途每台路由器通常不知道完整业务含义，也不需要知道 URL。它主要根据 IP 前缀转发。
+
+家庭路由器常执行 NAT/PAT，把内网四元组映射到公网地址：
+
+```text
+192.168.1.20:53142
+        ↓ NAT
+203.0.113.8:62001
+```
+
+返回包根据 NAT 状态表改回内网地址。NAT 不是 TCP 或 IP 实现可靠性的必需步骤，而是私网接入公网时常见的地址转换机制。
+
+Internet 路径可能经过：
+
+- 本地接入网络；
+- ISP；
+- 运营商骨干；
+- Internet Exchange；
+- 目标云厂商或 CDN 网络。
+
+BGP 决定自治系统之间如何传播可达前缀，IGP 和设备路由表再决定网络内部路径。路由不保证对称，去程和回程可以不同。
+
+## 目标 IP 很可能不是源站
+
+现代站点通常不会把应用服务器直接暴露在公网。DNS 返回的地址可能属于 CDN 或边缘负载均衡器：
+
+```text
+Client
+→ CDN Edge / DDoS Protection
+→ L4 Load Balancer
+→ TLS Terminator / Reverse Proxy
+→ Application Server
+→ Cache / Database / Downstream Service
+```
+
+TLS 可能在边缘终止，再以新的 TLS 或内部协议连接上游。HTTP 请求也可能被代理补充：
+
+```text
+Forwarded
+X-Forwarded-For
+X-Request-ID
+traceparent
+```
+
+这些头是否可信取决于代理边界。应用不能无条件相信来自公网客户端的 `X-Forwarded-For`。
+
+## 服务器内核如何把包交给应用
+
+服务器网卡收到帧后，大致执行反向路径：
+
+```text
+NIC RX queue
+→ DMA into memory
+→ driver / kernel network stack
+→ Ethernet demux
+→ IP validation and routing
+→ TCP lookup by four-tuple
+→ reorder / ACK / retransmission handling
+→ socket receive buffer
+→ wake application
+```
+
+监听程序先创建 Socket：
+
+```c
+socket();
+bind();
+listen();
+accept();
+```
+
+监听 Socket 代表“接受发往本地地址和端口的新连接”。`accept()` 返回的是已连接 Socket，具有具体四元组。监听 Socket 本身继续接受后续连接。
+
+高性能服务器可能使用：
+
+- Event Loop 配合 `epoll`、`kqueue` 或 io_uring；
+- 多进程或多线程 Worker；
+- `SO_REUSEPORT` 分散连接；
+- 用户态 TLS 库；
+- Kernel TLS 或其他 Offload。
+
+应用读取解密后的 HTTP 请求，执行路由、权限校验和业务逻辑，再生成响应。
+
+## 响应不是原路“倒放”
+
+服务器可能返回：
+
+```http
+HTTP/1.1 200 OK
+Content-Type: text/html; charset=UTF-8
+Content-Encoding: br
+Content-Length: ...
+Cache-Control: max-age=...
+
+<!doctype html>...
+```
+
+响应会经历 HTTP 编码、TLS 加密、TCP 分段、IP 路由和链路层发送。TCP ACK 可以与返回数据一起携带，也可能单独发送；路由路径也未必与请求一致。
+
+浏览器收到数据后：
+
+1. 内核 TCP 重组有序字节流；
+2. TLS 校验并解密 Record；
+3. HTTP 层解析状态码、Header 和 Body；
+4. 解压内容编码；
+5. 根据缓存规则存储响应；
+6. HTML Parser 构建 DOM；
+7. CSS Parser 构建 CSSOM；
+8. 执行脚本并发现子资源；
+9. 计算 Style、Layout、Paint 和 Composite。
+
+HTML 可以边下载边解析。浏览器发现 CSS、JavaScript、图片和字体后，会产生更多请求；它们可能复用当前 HTTP/2 或 HTTP/3 连接，也可能连接其他 Origin。
+
+页面“显示出来”不等于所有网络活动结束。首屏绘制、`DOMContentLoaded`、`load`、后台 Fetch 和动态渲染对应不同完成点。
+
+## 用工具观察这条链路
+
+### 看 DNS
+
+```bash
+dig example.com A
+dig example.com AAAA
+dig +trace example.com
+```
+
+`+trace` 自己沿委派链查询，和日常通过递归 Resolver 查询不是同一条路径。
+
+### 看路由
+
+Linux：
+
+```bash
+ip route get 93.184.216.34
+ip neigh
+```
+
+macOS：
+
+```bash
+route -n get 93.184.216.34
+arp -an
+```
+
+### 看连接、TLS 和 HTTP
+
+```bash
+curl -v --trace-time https://example.com/
+openssl s_client \
+  -connect example.com:443 \
+  -servername example.com \
+  -alpn h2,http/1.1
+```
+
+`curl -v` 会暴露 DNS 候选地址、连接目标、TLS 版本、ALPN 结果、请求头和响应头，但不会展示内核每个包的完整状态。
+
+### 看线上数据包
+
+在自己有权限的环境中抓包：
+
+```bash
+sudo tcpdump -i any -nn host example.com and port 443
+```
+
+macOS 通常需要指定实际接口，例如 `en0`。HTTPS Payload 是密文，但仍能看到 IP、端口、TCP Flags、包长和时序。网卡 Offload、抓包位置及 HTTP/3 都会改变观察结果。
+
+### 分解耗时
+
+```bash
+curl -o /dev/null -sS \
+  -w 'dns=%{time_namelookup}\nconnect=%{time_connect}\ntls=%{time_appconnect}\nfirst_byte=%{time_starttransfer}\ntotal=%{time_total}\n' \
+  https://example.com/
+```
+
+这些是累计时间点：
+
+```text
+time_namelookup   DNS 完成
+time_connect      TCP 连接完成
+time_appconnect   TLS 完成
+time_starttransfer 首字节到达
+time_total        整个传输完成
+```
+
+要得到阶段耗时，需要相邻值相减。连接复用、代理、HTTP/3 与不同 curl 构建也会改变含义。
+
+## 一条请求同时跨越三种世界
+
+可以把整个过程压缩为三层视角。
+
+### 应用语义
+
+```text
+URL → Origin → HTTP Method / Path / Headers / Body
+```
+
+这一层关心“请求什么”和“如何解释响应”。
+
+### 端到端通信
+
+```text
+DNS → IP Endpoint → TCP or QUIC → TLS
+```
+
+这一层关心“和谁通信”“如何可靠传输”“如何验证并加密”。
+
+### 逐跳交付
+
+```text
+Route → Neighbor → Frame → NIC → Router → Next Hop
+```
+
+这一层关心“当前这个包下一步交给谁”。
+
+三层不能互相替代。DNS 给出地址但不传输页面；TCP 传字节但不理解 URL；Ethernet 把帧送到下一跳，却不知道最终 HTTP 资源是什么。
+
+## 最终答案
+
+输入 URL 后，浏览器并不是把一段字符串直接“发到服务器”。它先把字符串解释成资源身份，再把主机名解析成网络地址；操作系统创建通信状态并选择路径；TCP 或 QUIC 建立端到端传输语义；TLS 建立身份与机密性；HTTP 表达资源请求；网卡和路由器把封装后的数据逐跳送达；服务器再沿自己的内核、代理与应用栈处理请求。
+
+真正贯穿全程的不是某一个“请求对象”，而是不断变化的表示：
+
+```text
+URL
+→ DNS Question
+→ Socket State
+→ TCP Segment / QUIC Packet
+→ IP Packet
+→ Link Frame
+→ HTTP Request
+→ Application Operation
+→ HTTP Response
+→ Pixels
+```
+
+每一层只解决一类问题，同时依赖下一层提供更基础的能力。理解这条边界，才算真正理解“访问一个网页”发生了什么。

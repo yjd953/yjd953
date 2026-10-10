@@ -1,0 +1,257 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="拆解 Tool Executor、Context、State、Session、Retry、Timeout 与 Cancellation。">
+  <meta name="theme-color" content="#f1f1ee">
+  <title>Agent Runtime 到底是什么？ — Dale Yang</title>
+  <link rel="stylesheet" href="../assets/site.css">
+</head>
+<body class="article-page">
+  <div class="reading-progress" id="readingProgress" aria-hidden="true"></div>
+
+  <header class="site-header">
+    <a class="wordmark" href="../" aria-label="Dale Yang home">DY<span>.</span></a>
+    <nav aria-label="Primary">
+      <a href="../sections/agent.html">Agent 探索</a>
+      <a href="https://github.com/yjd953">GitHub</a>
+    </nav>
+  </header>
+
+  <main class="article-layout">
+    <header class="article-masthead">
+      <a class="back-link" href="../sections/agent.html">← Agent 探索</a>
+      <p class="kicker">01.05 / Runtime / ZH</p>
+      <h1>Agent Runtime 到底是什么？</h1>
+      <p class="article-deck">拆解 Tool Executor、Context、State、Session、Retry、Timeout 与 Cancellation。</p>
+    </header>
+
+    <article class="prose">
+      <p>把 Prompt 发给 LLM，只能得到一次响应。即使响应中包含 Tool Call，模型也不会自己找到函数、执行请求、等待结果或开启下一轮。</p>
+<p>让 Agent 从“会提出行动”变成“能完成任务”的，是模型外面的 Agent Runtime。</p>
+<h2 id="section-为什么不能只有一个-llm">为什么不能只有一个 LLM</h2>
+<p>假设模型收到：</p>
+<pre><code class="language-text">请检查订单 123 的状态，如果已经超时，创建补偿单。
+</code></pre>
+<p>它可能生成：</p>
+<pre><code class="language-json">{&quot;name&quot;: &quot;get_order&quot;, &quot;arguments&quot;: {&quot;id&quot;: &quot;123&quot;}}
+</code></pre>
+<p>到这里模型调用已经结束。接下来必须有人回答：</p>
+<ul>
+<li><code>get_order</code> 对应哪个真实服务？</li>
+<li>用户能否读取这个订单？</li>
+<li>请求最多等待多久？</li>
+<li>服务返回 503 时是否重试？</li>
+<li>查询结果放到哪里？</li>
+<li>如果要创建补偿单，是否需要确认？</li>
+<li>进程重启后任务能否继续？</li>
+</ul>
+<p>这些问题都不属于语言模型推理，却决定系统是否真的可用。Runtime 就是承接这些责任的执行环境。</p>
+<p>可以把它理解为一层控制平面：</p>
+<pre><code class="language-text">用户 / 上游系统
+        ↓
+Agent Runtime
+  ├─ 调用 LLM
+  ├─ 执行 Tool
+  ├─ 管理 Context 与 State
+  ├─ 维护 Session
+  ├─ 实施权限与预算
+  └─ 记录 Trace
+        ↓
+外部 Environment
+</code></pre>
+<h2 id="section-tool-executor动作的唯一出口">Tool Executor：动作的唯一出口</h2>
+<p>模型输出的工具名只是字符串。Tool Executor 将它解析成真实能力，并在执行前后实施控制。</p>
+<p>一次执行通常经过：</p>
+<pre><code class="language-text">lookup → validate → authorize → schedule
+→ execute → normalize result → record
+</code></pre>
+<p>Executor 不应只做一个 <code>functions[name](**args)</code>。它至少要知道：</p>
+<ul>
+<li>工具版本和参数 Schema；</li>
+<li>调用者身份与所需权限；</li>
+<li>工具是只读还是有副作用；</li>
+<li>是否幂等、能否重试；</li>
+<li>超时和并发限制；</li>
+<li>返回结果如何截断和脱敏；</li>
+<li>审计事件写到哪里。</li>
+</ul>
+<p>对于代码执行、浏览器操作等高风险工具，还要提供沙箱、文件路径白名单、网络域名限制或进程隔离。</p>
+<h2 id="section-context这一轮模型实际看见什么">Context：这一轮模型实际看见什么</h2>
+<p>Context 是某一次模型调用的输入集合，可能包括：</p>
+<ul>
+<li>System Prompt；</li>
+<li>当前用户目标；</li>
+<li>最近对话；</li>
+<li>Tool Schema；</li>
+<li>最新 Observation；</li>
+<li>从 Memory 或 Knowledge 检索出的片段；</li>
+<li>当前任务状态摘要。</li>
+</ul>
+<p>Context Builder 的工作不是简单拼接字符串，而是做选择与排序。Context Window 有硬上限，输入越长成本和延迟越高，噪声也越多。</p>
+<p>一个可靠的构建过程会保留来源：</p>
+<pre><code class="language-json">{
+  &quot;content&quot;: &quot;订单 123 已超时 48 小时&quot;,
+  &quot;source&quot;: &quot;tool:get_order&quot;,
+  &quot;source_id&quot;: &quot;call_01&quot;,
+  &quot;observed_at&quot;: &quot;2026-09-30T10:00:00Z&quot;,
+  &quot;trust&quot;: &quot;authoritative&quot;
+}
+</code></pre>
+<p>模型看到的是文本，Runtime 必须知道这段文本从哪里来、是否过期、能否信任。</p>
+<h2 id="section-state任务当前处于哪里">State：任务当前处于哪里</h2>
+<p>Context 是给模型看的输入，State 是 Runtime 持有的事实。二者不能混为一谈。</p>
+<pre><code class="language-json">{
+  &quot;run_id&quot;: &quot;run_42&quot;,
+  &quot;status&quot;: &quot;waiting_for_approval&quot;,
+  &quot;current_step&quot;: 4,
+  &quot;order_id&quot;: &quot;123&quot;,
+  &quot;order_overdue&quot;: true,
+  &quot;compensation_id&quot;: null,
+  &quot;remaining_steps&quot;: 8,
+  &quot;pending_action&quot;: &quot;create_compensation&quot;
+}
+</code></pre>
+<p>State 应支持机器读取和状态迁移。不能只把“当前做到哪了”写进一段自然语言摘要，因为摘要可能遗漏字段，也不适合做并发控制。</p>
+<p>模型可以建议 <code>status = completed</code>，但 Runtime 应根据完成条件决定状态是否真的可转移。例如创建补偿单后，只有从订单服务重新读到补偿 ID，才能进入 <code>completed</code>。</p>
+<h2 id="section-session-与-run不要把一次会话当一次执行">Session 与 Run：不要把一次会话当一次执行</h2>
+<p>Session 表示一段持续交互，Run 表示其中一次具体任务执行。</p>
+<pre><code class="language-text">Session user_7/order_support
+  ├─ Run 001：查询订单状态
+  ├─ Run 002：申请补偿，等待确认
+  └─ Run 003：用户确认后继续执行
+</code></pre>
+<p>区分两者有几个好处：</p>
+<ul>
+<li>一次 Run 可以失败，不必破坏整个会话；</li>
+<li>可以为每次 Run 单独统计成本和 Trace；</li>
+<li>等待人工确认时，可以持久化后释放计算资源；</li>
+<li>同一 Session 中的并发请求可以做版本控制。</li>
+</ul>
+<p>生产系统通常还需要 Checkpoint。每次关键状态迁移后持久化，进程崩溃时从最后一个确认点恢复，而不是让模型凭历史文本猜测已执行到哪一步。</p>
+<h2 id="section-retry重试的是动作不是愿望">Retry：重试的是动作，不是愿望</h2>
+<p>模型调用超时、搜索服务限流、数据库连接断开，都可能是暂时错误。但 Retry 必须建立在错误分类上：</p>
+<pre><code class="language-text">invalid_arguments → 返回模型修正，不做相同重试
+rate_limited      → 按 retry_after 等待
+network_timeout   → 幂等调用可退避重试
+permission_denied → 不重试，升级或终止
+side_effect_unknown → 先查询结果，不直接重复执行
+</code></pre>
+<p>最后一种最危险。创建补偿单时客户端超时，并不能说明服务端没有创建成功。正确动作是用幂等键查询或重放，而不是再创建一张。</p>
+<p>Runtime 要保存 <code>attempt</code>、错误类型和每次执行结果，使模型看到的是最终的结构化 Observation，而不是一串重复异常。</p>
+<h2 id="section-timeout时间预算必须逐层传播">Timeout：时间预算必须逐层传播</h2>
+<p>只在最外层设置 60 秒超时通常无效。内部一次 HTTP 请求可能阻塞 120 秒，取消信号也可能没有传到下游。</p>
+<p>合理做法是传播 Deadline：</p>
+<pre><code class="language-text">Run deadline:       60s
+当前已消耗:         18s
+下一次 LLM 预算:    15s
+工具执行预算:       10s
+下游 HTTP 超时:      8s
+</code></pre>
+<p>每层使用剩余时间，而不是各自重新获得完整 60 秒。Runtime 还要区分：</p>
+<ul>
+<li>连接超时；</li>
+<li>单次读取超时；</li>
+<li>工具总耗时；</li>
+<li>单轮耗时；</li>
+<li>整个 Run 的 Deadline。</li>
+</ul>
+<p>超时后的状态也必须明确：工具肯定没执行、可能执行、还是已执行但结果丢失。</p>
+<h2 id="section-cancellation停止不是丢弃返回值">Cancellation：停止不是丢弃返回值</h2>
+<p>用户点击取消后，Runtime 需要：</p>
+<ol>
+<li>将 Run 标记为 <code>cancelling</code>；</li>
+<li>停止发起新的 LLM 和 Tool Call；</li>
+<li>向正在执行的任务传播取消信号；</li>
+<li>等待可取消动作退出；</li>
+<li>记录无法取消的外部副作用；</li>
+<li>将最终状态写成 <code>cancelled</code> 或 <code>cancelled_with_effects</code>。</li>
+</ol>
+<p>对于发邮件、支付等已经提交的操作，取消 Agent 并不能撤销现实结果。需要独立的补偿操作，而不是假设中止进程等于回滚世界。</p>
+<h2 id="section-scheduler谁获得下一次执行机会">Scheduler：谁获得下一次执行机会</h2>
+<p>单用户 Demo 可以用一个 <code>while</code> 循环。服务化以后，Runtime 还要调度数千个 Run：</p>
+<ul>
+<li>每个租户的并发上限；</li>
+<li>模型和工具的速率限制；</li>
+<li>等待人工输入的任务挂起；</li>
+<li>长任务的公平调度；</li>
+<li>优先级与成本预算；</li>
+<li>Worker 崩溃后的租约回收。</li>
+</ul>
+<p>这时 Agent Loop 更像一个持久化状态机。Worker 每次领取可运行步骤，执行后提交新的状态与事件，再由 Scheduler 决定是否继续。</p>
+<h2 id="section-trace让每次状态转移可解释">Trace：让每次状态转移可解释</h2>
+<p>Runtime 是最适合记录 Trace 的位置，因为它看见所有边界：</p>
+<pre><code class="language-text">Run
+  ├─ LLM Call
+  ├─ Tool Call
+  │    ├─ Attempt 1: timeout
+  │    └─ Attempt 2: success
+  ├─ State Transition
+  ├─ Approval Wait
+  └─ LLM Call
+</code></pre>
+<p>每个 Span 应关联输入摘要、输出、耗时、Token、错误、工具版本和状态变化。只有这样，最终回答错误时才能判断是模型选错、工具执行错、Observation 丢失，还是 Context 构建错。</p>
+<h2 id="section-runtime-与传统-runtime-的相似之处">Runtime 与传统 Runtime 的相似之处</h2>
+<p>操作系统 Runtime 或语言 Runtime 已经解决过许多相似问题：</p>
+<div class="table-scroll"><table>
+<thead>
+<tr>
+<th>传统系统</th>
+<th>Agent Runtime</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>进程 / 线程</td>
+<td>Run / Step</td>
+</tr>
+<tr>
+<td>系统调用</td>
+<td>Tool Call</td>
+</tr>
+<tr>
+<td>堆与持久化存储</td>
+<td>Context / Memory / State Store</td>
+</tr>
+<tr>
+<td>调度器</td>
+<td>Agent Scheduler</td>
+</tr>
+<tr>
+<td>超时与信号</td>
+<td>Deadline / Cancellation</td>
+</tr>
+<tr>
+<td>访问控制</td>
+<td>Tool Permission</td>
+</tr>
+<tr>
+<td>调用栈与 Trace</td>
+<td>LLM / Tool Span</td>
+</tr>
+</tbody></table></div>
+<p>差异在于，传统程序的下一条指令由代码和程序计数器决定；Agent 的部分控制流由概率模型在运行时生成。因此 Runtime 不仅执行已知指令，还必须验证动态生成的动作。</p>
+<h2 id="section-一个可用的最小边界">一个可用的最小边界</h2>
+<p>把 Runtime 设计得很复杂并不是目标。一个可用的最小版本应至少做到：</p>
+<pre><code class="language-text">输入目标
+→ 建立 Run 与预算
+→ 构造 Context
+→ 调用模型
+→ 校验并授权 Tool Call
+→ 有界执行
+→ 记录 Observation 与 State
+→ 判断继续、暂停或终止
+</code></pre>
+<p>其余能力都沿着真实风险增长。没有长任务时不必先造分布式调度器，但不能省略轮次上限；没有写操作时可以暂缓审批系统，但不能省略参数校验；没有跨会话需求时可以先用内存存储，但要清楚进程退出后信息会消失。</p>
+<p>Agent Runtime 的本质不是某个框架名称，而是一组不可逃避的系统责任。LLM 决定“接下来最好做什么”，Runtime 保证“允许做的事情以可控、可恢复、可追踪的方式发生”。当这条边界清晰，Agent 才从一次模型演示变成真正的软件系统。</p>
+
+    </article>
+  </main>
+
+  <footer class="site-footer article-footer">
+    <a href="../sections/agent.html">Agent 探索 / 核心机制</a>
+    <a href="https://github.com/yjd953/yjd953/blob/main/posts/agent-runtime.md">View source ↗</a>
+  </footer>
+  <script src="../assets/site.js" defer></script>
+</body>
+</html>
