@@ -28,6 +28,9 @@
 **03 / [後端八股](https://yjd953.github.io/yjd953/sections/backend.html)**<br>
 涵蓋 Java、Go、JVM、Redis、MySQL、MQ、網路與分散式系統。
 
+**04 / [Git 學習與實踐](https://yjd953.github.io/yjd953/sections/git.html)**<br>
+從物件、提交與分支出發，深入協作、歷史追查、故障復原、儲存庫治理、身分與隱私。
+
 ## 動態
 
 <picture>

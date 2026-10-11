@@ -1,0 +1,385 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="从对象可达性出发，处理错误邮箱、密钥、大文件和整仓历史重建，并验证清理结果。">
+  <meta name="theme-color" content="#f1f1ee">
+  <title>怎样安全地改写历史并清除敏感信息？ — Dale Yang</title>
+  <link rel="stylesheet" href="../assets/site.css">
+</head>
+<body class="article-page">
+  <div class="reading-progress" id="readingProgress" aria-hidden="true"></div>
+
+  <header class="site-header">
+    <a class="wordmark" href="../" aria-label="Dale Yang home">DY<span>.</span></a>
+    <nav aria-label="Primary">
+      <a href="../sections/git.html">Git 学习与实践</a>
+      <a href="https://github.com/yjd953">GitHub</a>
+    </nav>
+  </header>
+
+  <main class="article-layout">
+    <header class="article-masthead">
+      <a class="back-link" href="../sections/git.html">← Git 学习与实践</a>
+      <p class="kicker">04.15 / History rewrite / ZH</p>
+      <h1>怎样安全地改写历史并清除敏感信息？</h1>
+      <p class="article-deck">从对象可达性出发，处理错误邮箱、密钥、大文件和整仓历史重建，并验证清理结果。</p>
+    </header>
+
+    <article class="prose">
+      <p>历史改写不是“编辑旧 Commit”。Git 对象不可变，所谓改写是：</p>
+<ol>
+<li>根据旧历史创建一套新对象；</li>
+<li>让分支和标签指向新对象；</li>
+<li>旧对象失去公开引用；</li>
+<li>协调所有副本迁移到新历史。</li>
+</ol>
+<p>典型用途：</p>
+<ul>
+<li>Commit 元数据暴露真实邮箱；</li>
+<li>密钥进入文件历史；</li>
+<li>大文件让仓库膨胀；</li>
+<li>错误生成物贯穿大量提交；</li>
+<li>需要把当前快照重建成干净根提交。</li>
+</ul>
+<p>它是破坏性协作操作。执行前必须区分：</p>
+<pre><code class="language-text">修复当前文件
+改写可见历史
+吊销已泄露凭证
+清理本地不可达对象
+请求平台清理缓存
+</code></pre>
+<p>这些不是同一件事。</p>
+<h2 id="section-第一原则秘密泄露先轮换后清历史">第一原则：秘密泄露先轮换，后清历史</h2>
+<p>如果提交的是：</p>
+<ul>
+<li>API Key；</li>
+<li>Token；</li>
+<li>私钥；</li>
+<li>数据库密码；</li>
+<li>云访问密钥；</li>
+<li>签名密钥；</li>
+</ul>
+<p>立即：</p>
+<ol>
+<li>吊销；</li>
+<li>轮换；</li>
+<li>检查使用日志；</li>
+<li>缩小权限；</li>
+<li>通知安全负责人；</li>
+<li>再做历史清理。</li>
+</ol>
+<p>因为即使历史最终被改写：</p>
+<ul>
+<li>别人可能已经 Clone；</li>
+<li>CI 日志可能打印；</li>
+<li>搜索引擎可能索引；</li>
+<li>Fork 可能保留；</li>
+<li>平台缓存可能存在。</li>
+</ul>
+<p>历史清理降低继续暴露，不会让泄露从未发生。</p>
+<h2 id="section-改写前先盘点所有引用">改写前先盘点所有引用</h2>
+<pre><code class="language-bash">git status --short --branch
+git remote -v
+git branch --all --verbose
+git tag --list
+git stash list
+git show-ref
+</code></pre>
+<p>查看提交图：</p>
+<pre><code class="language-bash">git log --graph --oneline --decorate --all
+</code></pre>
+<p>检查目标信息：</p>
+<pre><code class="language-bash">git log --all \
+  --format=&#39;%H | %an &lt;%ae&gt; | %cn &lt;%ce&gt; | %s&#39;
+</code></pre>
+<p>检查文件历史：</p>
+<pre><code class="language-bash">git log --all -- path/to/sensitive-file
+</code></pre>
+<p>历史文本搜索可以遍历提交执行 <code>git grep</code>，大型仓库更适合专门扫描工具。</p>
+<p>如果敏感提交还被 Tag、旧分支或 PR 引用，只改 main 不够。</p>
+<h2 id="section-备份不是把旧秘密再次公开">备份不是把旧秘密再次公开</h2>
+<p>改写前需要可恢复备份，但备份必须受控：</p>
+<ul>
+<li>本地加密存储；</li>
+<li>受限访问目录；</li>
+<li>不推到另一个公开仓库；</li>
+<li>记录删除计划；</li>
+<li>秘密已经轮换。</li>
+</ul>
+<p>可以创建 Mirror Clone：</p>
+<pre><code class="language-bash">git clone --mirror &lt;repo-url&gt; repo-backup.git
+</code></pre>
+<p>它包含大量引用，适合受控备份，也意味着它完整保留敏感历史。不要把这个目录随意上传或共享。</p>
+<p>对于只需保留当前文件快照的场景，还可以导出普通目录备份，不包含 <code>.git</code>。</p>
+<h2 id="section-场景一只修正最后一个未共享提交">场景一：只修正最后一个未共享提交</h2>
+<p>当前配置已正确时：</p>
+<pre><code class="language-bash">git commit --amend --reset-author --no-edit
+</code></pre>
+<p>检查：</p>
+<pre><code class="language-bash">git show --no-patch --format=fuller HEAD
+</code></pre>
+<p>这会创建新 Commit。若尚未 Push，无需远端强推。</p>
+<p>如果已 Push 到个人分支且无人依赖：</p>
+<pre><code class="language-bash">git push --force-with-lease
+</code></pre>
+<p>仍应确认平台上的旧 Commit 是否由其他引用保留。</p>
+<h2 id="section-场景二少量未共享提交">场景二：少量未共享提交</h2>
+<pre><code class="language-bash">git rebase -i &lt;base&gt;
+</code></pre>
+<p>把目标提交改为：</p>
+<pre><code class="language-text">edit &lt;commit&gt; message
+</code></pre>
+<p>暂停后修正：</p>
+<pre><code class="language-bash">git commit --amend --reset-author --no-edit
+git rebase --continue
+</code></pre>
+<p>每个被改写提交之后的 Commit 都会因为 Parent 变化而得到新 ID。</p>
+<h2 id="section-场景三批量重写邮箱或文件历史">场景三：批量重写邮箱或文件历史</h2>
+<p>现代 Git 历史过滤通常优先使用 <code>git filter-repo</code>，而不是旧的 <code>filter-branch</code>。</p>
+<p>它不是 Git 所有安装都自带的核心子命令，需要单独安装。先：</p>
+<pre><code class="language-bash">git filter-repo --version
+</code></pre>
+<p>建议在全新 Mirror Clone 上操作：</p>
+<pre><code class="language-bash">git clone --mirror &lt;repo-url&gt; rewrite.git
+cd rewrite.git
+</code></pre>
+<p>这样：</p>
+<ul>
+<li>工作区状态不会混入；</li>
+<li>所有常规引用更容易统一处理；</li>
+<li>原本地仓库仍可用于对照；</li>
+<li>工具通常更容易判断这是新 Clone。</li>
+</ul>
+<h3 id="section-删除一个敏感文件的全部历史">删除一个敏感文件的全部历史</h3>
+<pre><code class="language-bash">git filter-repo \
+  --path path/to/secret.env \
+  --invert-paths
+</code></pre>
+<p>这会重写包含该路径的相关提交。</p>
+<p>如果文件历史中改过名字，需要列出所有旧路径，或先分析重命名。</p>
+<h3 id="section-替换文本">替换文本</h3>
+<p>准备受控替换规则文件，例如：</p>
+<pre><code class="language-text">literal:old-secret==&gt;REMOVED
+</code></pre>
+<p>执行：</p>
+<pre><code class="language-bash">git filter-repo --replace-text replacements.txt
+</code></pre>
+<p>替换后必须再次扫描。编码、压缩、拆分字符串和二进制内容可能逃过简单文本替换。</p>
+<h3 id="section-修改邮箱映射">修改邮箱映射</h3>
+<p>可以使用 Mailmap 或 Filter-repo 的 Mailmap 能力进行身份映射，具体命令应按当前版本文档执行。映射文件概念：</p>
+<pre><code class="language-text">DaleYang &lt;noreply-address&gt; &lt;old-company-address&gt;
+</code></pre>
+<p>注意 <code>.mailmap</code> 仅用于显示规范化时，不一定改写底层 Commit；历史清理必须确认工具实际重写了对象，而不是只改变 <code>git log</code> 展示。</p>
+<h2 id="section-场景四保留当前文件清空全部历史">场景四：保留当前文件，清空全部历史</h2>
+<p>如果可以接受所有旧提交消失，最直接方案是创建 Orphan Branch：</p>
+<pre><code class="language-bash">git switch --orphan clean-main
+git add -A
+</code></pre>
+<p>使用一次性身份提交，不必修改全局配置：</p>
+<pre><code class="language-bash">GIT_AUTHOR_NAME=&quot;DaleYang&quot; \
+GIT_AUTHOR_EMAIL=&quot;&lt;noreply-email&gt;&quot; \
+GIT_COMMITTER_NAME=&quot;DaleYang&quot; \
+GIT_COMMITTER_EMAIL=&quot;&lt;noreply-email&gt;&quot; \
+git commit -m &quot;Initial public snapshot&quot;
+</code></pre>
+<p>替换本地 main：</p>
+<pre><code class="language-bash">git branch -M main
+</code></pre>
+<p>远端更新前先确认：</p>
+<pre><code class="language-bash">git log --graph --oneline --decorate --all
+git show --no-patch --format=fuller HEAD
+git status --short
+</code></pre>
+<p>推送：</p>
+<pre><code class="language-bash">git push --force-with-lease origin main
+</code></pre>
+<p>旧远端分支和 Tag 也可能引用旧历史：</p>
+<pre><code class="language-bash">git ls-remote --heads origin
+git ls-remote --tags origin
+</code></pre>
+<p>按计划删除不再需要的引用，而不是只处理 main。</p>
+<h2 id="section-为什么删除当前文件没有清除历史">为什么删除当前文件没有清除历史</h2>
+<p>假设：</p>
+<pre><code class="language-text">A：提交 secret.env
+B：正常修改
+C：删除 secret.env
+</code></pre>
+<p>当前 C 的工作区没有文件，但 A 的 Tree 仍引用秘密 Blob：</p>
+<pre><code class="language-text">C → B → A → secret Blob
+</code></pre>
+<p>Clone 完整仓库后仍能：</p>
+<pre><code class="language-bash">git show A:secret.env
+</code></pre>
+<p>只有重写 A 及其后代，或让整段历史从公开引用不可达，才能从常规历史中移除。</p>
+<h2 id="section-为什么-force-push-后旧-commit-可能还能访问">为什么 Force Push 后旧 Commit 可能还能访问</h2>
+<p>可能原因：</p>
+<ul>
+<li>其他远端分支仍引用；</li>
+<li>Tag 仍引用；</li>
+<li>Pull Request 隐藏引用；</li>
+<li>Fork 仍引用；</li>
+<li>平台 GC 尚未发生；</li>
+<li>Commit 页面缓存；</li>
+<li>别人的 Clone；</li>
+<li>搜索引擎缓存。</li>
+</ul>
+<p>因此“远端 main 已看不到”只证明主引用更新成功，不证明全网绝对删除。</p>
+<p>敏感度高时，应联系托管平台 Support，提供：</p>
+<ul>
+<li>仓库；</li>
+<li>受影响 Commit；</li>
+<li>已完成的历史改写；</li>
+<li>需要清理的缓存或 Pull Request 引用；</li>
+<li>凭证已轮换证明。</li>
+</ul>
+<p>具体支持范围取决于平台。</p>
+<h2 id="section-改写后怎样验证">改写后怎样验证</h2>
+<h3 id="section-检查引用">检查引用</h3>
+<pre><code class="language-bash">git show-ref
+git branch --all
+git tag --list
+</code></pre>
+<h3 id="section-检查身份">检查身份</h3>
+<pre><code class="language-bash">git log --all \
+  --format=&#39;%H%x09%an%x09%ae%x09%cn%x09%ce&#39; |
+grep -i &#39;&lt;sensitive-domain&gt;&#39;
+</code></pre>
+<p>预期无输出。</p>
+<h3 id="section-检查敏感文件路径">检查敏感文件路径</h3>
+<pre><code class="language-bash">git log --all -- path/to/secret.env
+</code></pre>
+<h3 id="section-检查对象可访问性">检查对象可访问性</h3>
+<pre><code class="language-bash">git cat-file -e &lt;old-commit&gt;^{commit}
+</code></pre>
+<p>在清理后的新 Clone 中应失败，前提是远端没有其他引用保留对象。</p>
+<h3 id="section-从远端全新-clone-验证">从远端全新 Clone 验证</h3>
+<p>不要只验证执行改写的本地仓库：</p>
+<pre><code class="language-bash">git clone &lt;repo-url&gt; verify-clone
+cd verify-clone
+git log --all --oneline
+</code></pre>
+<p>再运行身份、路径、密钥扫描。</p>
+<p>这是最接近普通新访问者看到的状态。</p>
+<h2 id="section-本地旧仓库怎样同步">本地旧仓库怎样同步</h2>
+<p>远端历史已协调重建后，旧 Clone 可以：</p>
+<h3 id="section-最干净重新-clone">最干净：重新 Clone</h3>
+<p>备份未提交工作后删除旧 Clone，再重新获取。</p>
+<h3 id="section-保留目录fetch-hard-reset">保留目录：Fetch + Hard Reset</h3>
+<p>确认没有需要保留的本地修改：</p>
+<pre><code class="language-bash">git status --short
+</code></pre>
+<p>然后：</p>
+<pre><code class="language-bash">git fetch origin --prune
+git reset --hard origin/main
+</code></pre>
+<p>旧本地分支、Tag 和 Reflog仍可能保留旧对象，应逐项处理。</p>
+<h3 id="section-清除本地不可达对象">清除本地不可达对象</h3>
+<p>只有在确认不再需要恢复旧历史后：</p>
+<pre><code class="language-bash">git reflog expire \
+  --expire=now \
+  --expire-unreachable=now \
+  --all
+
+git gc --prune=now
+</code></pre>
+<p>验证：</p>
+<pre><code class="language-bash">git fsck --unreachable --no-reflogs
+git cat-file -e &lt;old-commit&gt;^{commit}
+</code></pre>
+<p>激进 GC 会破坏本地恢复线索。不要把它作为日常“清缓存”命令。</p>
+<h2 id="section-协作者如何迁移">协作者如何迁移</h2>
+<p>历史改写前通知：</p>
+<ul>
+<li>影响哪些分支和 Tag；</li>
+<li>冻结 Push 的时间窗口；</li>
+<li>新旧基线 Commit；</li>
+<li>未合并工作如何迁移；</li>
+<li>截止时间；</li>
+<li>谁负责验证。</li>
+</ul>
+<p>协作者若有功能分支：</p>
+<pre><code class="language-text">旧主干：A ← B ← C
+                 ↖ X ← Y
+
+新主干：A&#39; ← B&#39; ← C&#39;
+</code></pre>
+<p>可以把 X、Y 重放到新主干：</p>
+<pre><code class="language-bash">git fetch origin
+git rebase --onto origin/main &lt;old-base-C&gt; feature
+</code></pre>
+<p>复杂分支可能更适合：</p>
+<ol>
+<li>新建基于新 main 的分支；</li>
+<li>Cherry-pick 自己的业务提交；</li>
+<li>完整测试；</li>
+<li>推送新分支。</li>
+</ol>
+<p>不要直接把旧分支 Merge 回新主干，否则可能重新引入已清理的旧历史。</p>
+<h2 id="section-分支保护与自动化">分支保护与自动化</h2>
+<p>Force Push 可能被分支保护拒绝。历史清理前需要：</p>
+<ul>
+<li>获得仓库管理员批准；</li>
+<li>临时调整保护规则；</li>
+<li>暂停自动部署；</li>
+<li>停止 Bot 自动提交；</li>
+<li>完成后恢复规则；</li>
+<li>验证 GitHub Pages、Release 和 Actions。</li>
+</ul>
+<p>历史重写会使基于 Commit ID 的：</p>
+<ul>
+<li>CI 缓存；</li>
+<li>部署记录；</li>
+<li>Issue 链接；</li>
+<li>Review 评论；</li>
+<li>Release 资产关联；</li>
+</ul>
+<p>可能失效或指向旧对象。</p>
+<h2 id="section-filter-branch-为什么不再优先"><code>filter-branch</code> 为什么不再优先</h2>
+<p>旧教程常见：</p>
+<pre><code class="language-bash">git filter-branch ...
+</code></pre>
+<p>它：</p>
+<ul>
+<li>容易留下备份引用；</li>
+<li>性能较差；</li>
+<li>复杂边界容易出错；</li>
+<li>官方长期警告其风险。</li>
+</ul>
+<p>现代场景通常优先：</p>
+<ul>
+<li><code>git filter-repo</code>；</li>
+<li>BFG Repo-Cleaner，适合部分大文件/秘密场景；</li>
+<li>Orphan Branch，适合完全清空历史。</li>
+</ul>
+<p>选择工具前先明确目标，不要盲目复制一条删除命令。</p>
+<h2 id="section-历史清理完成标准">历史清理完成标准</h2>
+<ul>
+<li><input disabled type="checkbox"> 泄露凭证已吊销和轮换；</li>
+<li><input disabled type="checkbox"> 所有公开 Branch 已检查；</li>
+<li><input disabled type="checkbox"> 所有 Tag 已检查；</li>
+<li><input disabled type="checkbox"> 旧敏感 Commit 不在新 Clone 可达历史；</li>
+<li><input disabled type="checkbox"> 文件正文和 Commit 元数据重新扫描；</li>
+<li><input disabled type="checkbox"> CI、Pages、Release 正常；</li>
+<li><input disabled type="checkbox"> 分支保护已恢复；</li>
+<li><input disabled type="checkbox"> 协作者已迁移；</li>
+<li><input disabled type="checkbox"> 必要时已联系平台清缓存；</li>
+<li><input disabled type="checkbox"> 受控备份有明确销毁计划。</li>
+</ul>
+<p>最重要的边界是：</p>
+<blockquote>
+<p>Git 可以让敏感对象不再从官方引用可达，但无法远程删除所有已经分发出去的副本。</p>
+</blockquote>
+<p>因此真正的安全处置始终是“凭证失效 + 历史清理 + 暴露调查 + 流程预防”的组合。</p>
+
+    </article>
+  </main>
+
+  <footer class="site-footer article-footer">
+    <a href="../sections/git.html">Git 学习与实践 / 工程治理</a>
+    <a href="https://github.com/yjd953/yjd953/blob/main/posts/git-history-rewrite.md">View source ↗</a>
+  </footer>
+  <script src="../assets/site.js" defer></script>
+</body>
+</html>

@@ -1,0 +1,395 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="用 log、show、diff、blame 和文件历史追踪提交、代码行与变更来源。">
+  <meta name="theme-color" content="#f1f1ee">
+  <title>Git 是怎样还原每次代码变化的？ — Dale Yang</title>
+  <link rel="stylesheet" href="../assets/site.css">
+</head>
+<body class="article-page">
+  <div class="reading-progress" id="readingProgress" aria-hidden="true"></div>
+
+  <header class="site-header">
+    <a class="wordmark" href="../" aria-label="Dale Yang home">DY<span>.</span></a>
+    <nav aria-label="Primary">
+      <a href="../sections/git.html">Git 学习与实践</a>
+      <a href="https://github.com/yjd953">GitHub</a>
+    </nav>
+  </header>
+
+  <main class="article-layout">
+    <header class="article-masthead">
+      <a class="back-link" href="../sections/git.html">← Git 学习与实践</a>
+      <p class="kicker">04.05 / History inspection / ZH</p>
+      <h1>Git 是怎样还原每次代码变化的？</h1>
+      <p class="article-deck">用 log、show、diff、blame 和文件历史追踪提交、代码行与变更来源。</p>
+    </header>
+
+    <article class="prose">
+      <p>一个 Git 仓库看起来只有当前文件，但 <code>.git</code> 中保存着历史对象和引用。Git 可以回答不同层次的问题：</p>
+<ul>
+<li>项目有哪些提交？</li>
+<li>某个提交由谁创建？</li>
+<li>某次提交改了哪些文件和代码？</li>
+<li>一个文件经历过哪些变化？</li>
+<li>当前某一行最后由哪个提交修改？</li>
+<li>一个 Bug 从哪个版本开始出现？</li>
+</ul>
+<p>这些问题不能靠一条命令全部解决。需要先明确查询对象。</p>
+<h2 id="section-查看提交图git-log">查看提交图：<code>git log</code></h2>
+<p>最常用的全局视图：</p>
+<pre><code class="language-bash">git log --oneline --decorate --graph --all
+</code></pre>
+<p>示例：</p>
+<pre><code class="language-text">*   a71b92e (HEAD -&gt; main) merge feature
+|\
+| * 8c204fd (feature) add validation
+* | 991a12d update docs
+|/
+* 2803068 initial snapshot
+</code></pre>
+<p>其中：</p>
+<ul>
+<li><code>*</code> 是提交节点；</li>
+<li>线条表示父子关系；</li>
+<li><code>HEAD -&gt; main</code> 表示当前 HEAD 指向 main；</li>
+<li><code>feature</code> 是另一个引用；</li>
+<li>短哈希只是完整对象 ID 的缩写。</li>
+</ul>
+<p>不要只看线性列表。如果仓库有 Merge，<code>--graph --all</code> 更接近真实提交图。</p>
+<p>自定义格式：</p>
+<pre><code class="language-bash">git log \
+  --format=&#39;%h | %ad | %an &lt;%ae&gt; | %s&#39; \
+  --date=short
+</code></pre>
+<p>这可以审计每个提交的：</p>
+<ul>
+<li>Commit ID；</li>
+<li>作者时间；</li>
+<li>Author 名称与邮箱；</li>
+<li>Message。</li>
+</ul>
+<p>如果需要同时看 Committer：</p>
+<pre><code class="language-bash">git log --format=fuller
+</code></pre>
+<h2 id="section-author-和-committer-是两套字段">Author 和 Committer 是两套字段</h2>
+<p>一个提交可能显示：</p>
+<pre><code class="language-text">Author:    Alice &lt;alice@example.com&gt;
+Commit:    Bob &lt;bob@example.com&gt;
+</code></pre>
+<p>常见场景：</p>
+<ul>
+<li>Alice 写了补丁，Bob 应用并提交；</li>
+<li>Cherry-pick 保留原 Author，但 Committer 变成执行者；</li>
+<li>Rebase 重新创建提交，Author 时间可保留，Committer 时间更新；</li>
+<li>GitHub 网页合并由平台创建新 Commit。</li>
+</ul>
+<p>精确输出：</p>
+<pre><code class="language-bash">git show -s --format=&#39;
+commit:    %H
+author:    %an &lt;%ae&gt;
+author at: %aI
+committer: %cn &lt;%ce&gt;
+commit at: %cI
+subject:   %s
+&#39; &lt;commit&gt;
+</code></pre>
+<p>隐私检查时，Author 邮箱和 Committer 邮箱都要检查。</p>
+<h2 id="section-查看一个提交git-show">查看一个提交：<code>git show</code></h2>
+<pre><code class="language-bash">git show &lt;commit&gt;
+</code></pre>
+<p>默认显示：</p>
+<ol>
+<li>提交元数据；</li>
+<li>提交说明；</li>
+<li>相对父提交的 Patch。</li>
+</ol>
+<p>只看概要：</p>
+<pre><code class="language-bash">git show --stat &lt;commit&gt;
+</code></pre>
+<p>只看文件状态：</p>
+<pre><code class="language-bash">git show --name-status &lt;commit&gt;
+</code></pre>
+<p>只看元数据：</p>
+<pre><code class="language-bash">git show --no-patch --format=fuller &lt;commit&gt;
+</code></pre>
+<p>只看某个文件：</p>
+<pre><code class="language-bash">git show &lt;commit&gt; -- path/to/file
+</code></pre>
+<p>查看该提交中的文件完整内容：</p>
+<pre><code class="language-bash">git show &lt;commit&gt;:path/to/file
+</code></pre>
+<p>注意两种语法的区别：</p>
+<pre><code class="language-text">git show C -- file   比较 C 与父提交时 file 的变化
+git show C:file      读取 C 快照中的 file 内容
+</code></pre>
+<h2 id="section-git-如何得到这次变化">Git 如何得到“这次变化”</h2>
+<p>普通 Commit 对象主要保存：</p>
+<ul>
+<li>根 Tree；</li>
+<li>Parent；</li>
+<li>Author/Committer；</li>
+<li>Message。</li>
+</ul>
+<p>它不直接保存一份面向用户的统一 Diff。<code>git show C</code> 大致做：</p>
+<pre><code class="language-text">读取 C 的 Tree
+读取 C^ 的 Tree
+比较路径与 Blob
+根据 Diff 算法生成 Patch
+</code></pre>
+<p>对于根提交，没有父节点，Git 把它视为从空 Tree 创建全部文件。</p>
+<p>对于 Merge Commit，有多个 Parent。默认 <code>git show</code> 可能不展示普通 Patch，因为“相对哪个父提交”并不唯一。可以使用：</p>
+<pre><code class="language-bash">git show -m &lt;merge-commit&gt;
+git show --first-parent &lt;merge-commit&gt;
+git diff &lt;merge&gt;^1 &lt;merge&gt;
+git diff &lt;merge&gt;^2 &lt;merge&gt;
+</code></pre>
+<h2 id="section-比较任意两个状态git-diff">比较任意两个状态：<code>git diff</code></h2>
+<p>工作区与暂存区：</p>
+<pre><code class="language-bash">git diff
+</code></pre>
+<p>暂存区与 HEAD：</p>
+<pre><code class="language-bash">git diff --staged
+</code></pre>
+<p>工作区与 HEAD：</p>
+<pre><code class="language-bash">git diff HEAD
+</code></pre>
+<p>两个提交：</p>
+<pre><code class="language-bash">git diff A B
+</code></pre>
+<p>两个分支端点：</p>
+<pre><code class="language-bash">git diff main feature
+</code></pre>
+<p>从共同祖先到 feature：</p>
+<pre><code class="language-bash">git diff main...feature
+</code></pre>
+<p>后者很适合检查 Pull Request 中“这个分支相对开始分叉时做了什么”。</p>
+<p>只看文件列表：</p>
+<pre><code class="language-bash">git diff --name-status A B
+</code></pre>
+<p>输出状态包括：</p>
+<pre><code class="language-text">M  modified
+A  added
+D  deleted
+R  renamed
+C  copied
+</code></pre>
+<p><code>R</code> 和 <code>C</code> 通常是比较时根据相似度推断，不是对象中永久保存的操作事件。</p>
+<h2 id="section-查看一个文件的完整历史">查看一个文件的完整历史</h2>
+<pre><code class="language-bash">git log -- path/to/file
+</code></pre>
+<p>同时显示 Patch：</p>
+<pre><code class="language-bash">git log -p -- path/to/file
+</code></pre>
+<p>显示统计：</p>
+<pre><code class="language-bash">git log --stat -- path/to/file
+</code></pre>
+<p>跟随简单重命名：</p>
+<pre><code class="language-bash">git log --follow -- path/to/file
+</code></pre>
+<p><code>--follow</code> 有边界：</p>
+<ul>
+<li>主要针对单个文件；</li>
+<li>重命名是相似度推断；</li>
+<li>大幅重写可能无法追踪；</li>
+<li>复杂目录拆分不一定完整。</li>
+</ul>
+<p>查看某文件在旧提交中的样子：</p>
+<pre><code class="language-bash">git show &lt;commit&gt;:path/to/file
+</code></pre>
+<p>比较该文件两个版本：</p>
+<pre><code class="language-bash">git diff A B -- path/to/file
+</code></pre>
+<h2 id="section-查看每一行最后由谁修改git-blame">查看每一行最后由谁修改：<code>git blame</code></h2>
+<pre><code class="language-bash">git blame path/to/file
+</code></pre>
+<p>输出类似：</p>
+<pre><code class="language-text">8c204fd1 (Alice 2026-10-01 10:20:00 +0800 10) validate(input);
+</code></pre>
+<p>它回答：</p>
+<blockquote>
+<p>当前版本这一行，最后由哪个提交引入或修改？</p>
+</blockquote>
+<p>不是：</p>
+<blockquote>
+<p>最初是谁发明了这行逻辑？</p>
+</blockquote>
+<p>如果之后有人只做格式化，这一行的 Blame 可能指向格式化提交。常用选项：</p>
+<pre><code class="language-bash">git blame -w path/to/file
+</code></pre>
+<p>忽略纯空白变化。</p>
+<p>查看指定行：</p>
+<pre><code class="language-bash">git blame -L 40,70 path/to/file
+</code></pre>
+<p>尝试识别行移动和复制：</p>
+<pre><code class="language-bash">git blame -M -C path/to/file
+</code></pre>
+<p>进一步查看对应提交：</p>
+<pre><code class="language-bash">git show &lt;blame-output-commit&gt;
+</code></pre>
+<p>Blame 是调查入口，不是责任追究工具。代码通常经过多人 Review、重构和迁移，最后修改者不一定是问题根因的设计者。</p>
+<h2 id="section-按内容搜索历史git-log-s-与-g">按内容搜索历史：<code>git log -S</code> 与 <code>-G</code></h2>
+<p>找某个字符串的出现次数在哪次提交中改变：</p>
+<pre><code class="language-bash">git log -S&#39;legacyApi&#39; --oneline
+</code></pre>
+<p>同时显示 Patch：</p>
+<pre><code class="language-bash">git log -S&#39;legacyApi&#39; -p
+</code></pre>
+<p><code>-S</code> 是 Pickaxe，它寻找字符串出现次数发生变化的提交。</p>
+<p>按 Patch 行匹配正则：</p>
+<pre><code class="language-bash">git log -G&#39;validate\\(.+\\)&#39; -p
+</code></pre>
+<p>区别：</p>
+<ul>
+<li><code>-S</code> 关注字符串计数变化；</li>
+<li><code>-G</code> 关注 Diff 中新增或删除行是否匹配正则。</li>
+</ul>
+<p>找函数历史：</p>
+<pre><code class="language-bash">git log -L :functionName:path/to/file
+</code></pre>
+<p>这对长期演化分析有帮助，但依赖 Git 能识别语言函数边界。</p>
+<h2 id="section-按作者时间和说明过滤">按作者、时间和说明过滤</h2>
+<pre><code class="language-bash">git log --author=&#39;Dale&#39;
+git log --since=&#39;2026-09-01&#39; --until=&#39;2026-10-01&#39;
+git log --grep=&#39;privacy&#39;
+git log --all --regexp-ignore-case --grep=&#39;git&#39;
+</code></pre>
+<p>组合：</p>
+<pre><code class="language-bash">git log \
+  --all \
+  --author=&#39;example.com&#39; \
+  --since=&#39;2026-01-01&#39; \
+  --format=&#39;%H %an &lt;%ae&gt; %s&#39;
+</code></pre>
+<p>审计邮箱更直接：</p>
+<pre><code class="language-bash">git log --all --format=&#39;%H%x09%an%x09%ae%x09%cn%x09%ce&#39;
+</code></pre>
+<p>再通过 <code>grep</code> 或结构化脚本检查域名。</p>
+<h2 id="section-查看分支之间有哪些提交">查看分支之间有哪些提交</h2>
+<p>只在 feature：</p>
+<pre><code class="language-bash">git log main..feature
+</code></pre>
+<p>只在 main：</p>
+<pre><code class="language-bash">git log feature..main
+</code></pre>
+<p>两边各自独有：</p>
+<pre><code class="language-bash">git log --left-right --graph --oneline main...feature
+</code></pre>
+<p>示例：</p>
+<pre><code class="language-text">&lt; a1b2c3 local change
+&gt; d4e5f6 remote change
+</code></pre>
+<p>查看提交同时附带 Patch：</p>
+<pre><code class="language-bash">git log -p main..feature
+</code></pre>
+<p>检查提交是否已被另一个分支包含：</p>
+<pre><code class="language-bash">git branch --contains &lt;commit&gt;
+git tag --contains &lt;commit&gt;
+</code></pre>
+<p>这对删除分支前判断提交是否仍可达非常重要。</p>
+<h2 id="section-查找一个-commit-属于哪些引用">查找一个 Commit 属于哪些引用</h2>
+<pre><code class="language-bash">git branch --all --contains &lt;commit&gt;
+git tag --contains &lt;commit&gt;
+</code></pre>
+<p>查看所有直接引用：</p>
+<pre><code class="language-bash">git show-ref
+</code></pre>
+<p>检查对象是否存在：</p>
+<pre><code class="language-bash">git cat-file -e &lt;commit&gt;^{commit}
+</code></pre>
+<p>成功无输出，失败返回非零状态。</p>
+<p>注意：对象存在不等于仍属于公开分支。旧 Commit 可能：</p>
+<ul>
+<li>仍由 Reflog 保存；</li>
+<li>处于不可达但尚未 GC 的状态；</li>
+<li>被平台隐藏引用保留；</li>
+<li>存在于别人的 Fork。</li>
+</ul>
+<h2 id="section-调查一处异常代码的完整流程">调查一处异常代码的完整流程</h2>
+<p>假设当前文件第 120 行出现：</p>
+<pre><code class="language-js">const timeout = 0;
+</code></pre>
+<p>第一步，找最后修改者：</p>
+<pre><code class="language-bash">git blame -L 115,125 src/client.js
+</code></pre>
+<p>第二步，查看提交上下文：</p>
+<pre><code class="language-bash">git show &lt;commit&gt; -- src/client.js
+</code></pre>
+<p>第三步，查看文件演化：</p>
+<pre><code class="language-bash">git log -p --follow -- src/client.js
+</code></pre>
+<p>第四步，搜索这个配置何时出现：</p>
+<pre><code class="language-bash">git log -S&#39;const timeout = 0&#39; -p --all
+</code></pre>
+<p>第五步，检查提交图与分支：</p>
+<pre><code class="language-bash">git log --graph --oneline --decorate --all
+git branch --all --contains &lt;commit&gt;
+</code></pre>
+<p>这样可以区分：</p>
+<ul>
+<li>逻辑最初被谁引入；</li>
+<li>后来是否迁移或格式化；</li>
+<li>哪个合并把它带入主干；</li>
+<li>当前哪些版本仍包含它。</li>
+</ul>
+<h2 id="section-ide-为什么有时看不到历史">IDE 为什么有时看不到历史</h2>
+<p>历史实际位于 <code>.git</code> 对象和引用中。IDE 的 Git 面板只是读取并展示这些数据。</p>
+<p>看不到历史的常见原因：</p>
+<ul>
+<li>打开的不是仓库根目录；</li>
+<li><code>.git</code> 在父目录；</li>
+<li>IDE 只显示当前分支；</li>
+<li>远端引用尚未 Fetch；</li>
+<li>历史刚被改写，本地缓存未刷新；</li>
+<li>当前目录是导出的源码包，没有 <code>.git</code>；</li>
+<li>Shallow Clone 只下载了部分历史。</li>
+</ul>
+<p>检查：</p>
+<pre><code class="language-bash">git rev-parse --show-toplevel
+git rev-parse --is-shallow-repository
+git branch --all
+git log --all --oneline
+</code></pre>
+<p>如果是浅克隆：</p>
+<pre><code class="language-bash">git fetch --unshallow
+</code></pre>
+<p>前提是远端仍保留完整历史。</p>
+<h2 id="section-一套只读历史检查清单">一套只读历史检查清单</h2>
+<pre><code class="language-bash"># 仓库与分支状态
+git status --short --branch
+
+# 全部提交图
+git log --graph --oneline --decorate --all
+
+# 身份信息
+git log --all --format=&#39;%H | %an &lt;%ae&gt; | %cn &lt;%ce&gt; | %s&#39;
+
+# 单个提交
+git show --stat --format=fuller &lt;commit&gt;
+
+# 单文件历史
+git log -p --follow -- path/to/file
+
+# 当前行来源
+git blame -L 1,120 path/to/file
+
+# 内容何时出现
+git log -S&#39;search text&#39; -p --all
+
+# 分支差异
+git log --left-right --oneline main...feature
+</code></pre>
+<p>这些命令默认只读，不会修改仓库。先用它们建立事实，再决定是否撤销、合并或改写历史。</p>
+
+    </article>
+  </main>
+
+  <footer class="site-footer article-footer">
+    <a href="../sections/git.html">Git 学习与实践 / 历史与恢复</a>
+    <a href="https://github.com/yjd953/yjd953/blob/main/posts/git-inspect-history.md">View source ↗</a>
+  </footer>
+  <script src="../assets/site.js" defer></script>
+</body>
+</html>

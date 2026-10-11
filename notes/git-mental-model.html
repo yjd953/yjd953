@@ -1,0 +1,335 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="从工作区、暂存区和本地仓库建立第一张地图，理解一次修改如何进入历史。">
+  <meta name="theme-color" content="#f1f1ee">
+  <title>Git 到底在管理什么？ — Dale Yang</title>
+  <link rel="stylesheet" href="../assets/site.css">
+</head>
+<body class="article-page">
+  <div class="reading-progress" id="readingProgress" aria-hidden="true"></div>
+
+  <header class="site-header">
+    <a class="wordmark" href="../" aria-label="Dale Yang home">DY<span>.</span></a>
+    <nav aria-label="Primary">
+      <a href="../sections/git.html">Git 学习与实践</a>
+      <a href="https://github.com/yjd953">GitHub</a>
+    </nav>
+  </header>
+
+  <main class="article-layout">
+    <header class="article-masthead">
+      <a class="back-link" href="../sections/git.html">← Git 学习与实践</a>
+      <p class="kicker">04.01 / Mental model / ZH</p>
+      <h1>Git 到底在管理什么？</h1>
+      <p class="article-deck">从工作区、暂存区和本地仓库建立第一张地图，理解一次修改如何进入历史。</p>
+    </header>
+
+    <article class="prose">
+      <p>很多人第一次接触 Git，会把它理解成“保存代码修改记录的工具”。这个说法没有错，但太容易形成错误直觉：</p>
+<ul>
+<li>以为 Git 只保存差异；</li>
+<li>以为 <code>git add</code> 是把文件上传到某个地方；</li>
+<li>以为分支是复制出来的一整套目录；</li>
+<li>以为删除 <code>.git</code> 只是删除日志；</li>
+<li>以为 GitHub 就是 Git。</li>
+</ul>
+<p>更准确的说法是：</p>
+<blockquote>
+<p>Git 是一个以提交图组织文件快照、以引用定位历史节点的本地版本数据库。</p>
+</blockquote>
+<p>日常使用 Git，本质上是在三个区域之间搬运文件状态：</p>
+<pre><code class="language-text">工作区 Working Tree
+        │ git add
+        ▼
+暂存区 Index
+        │ git commit
+        ▼
+本地仓库 Repository
+        │ git push
+        ▼
+远端仓库 Remote Repository
+</code></pre>
+<p>先把这张地图建立起来，后面的 <code>reset</code>、<code>restore</code>、<code>checkout</code>、<code>rebase</code> 才不会变成死记命令。</p>
+<h2 id="section-工作区你现在真正看见和编辑的文件">工作区：你现在真正看见和编辑的文件</h2>
+<p>工作区就是项目目录中普通可见的文件：</p>
+<pre><code class="language-text">my-project/
+├── README.md
+├── src/
+├── package.json
+└── .git/
+</code></pre>
+<p>IDE 修改的是工作区。你在 <code>README.md</code> 中增加一行文字，这个动作暂时只改变磁盘上的文件，并没有自动进入 Git 历史。</p>
+<p>此时运行：</p>
+<pre><code class="language-bash">git status
+</code></pre>
+<p>Git 会比较：</p>
+<ol>
+<li>当前提交中的快照；</li>
+<li>暂存区中的候选快照；</li>
+<li>工作区中的实际文件。</li>
+</ol>
+<p>如果工作区文件与暂存区不同，它就会显示 <code>Changes not staged for commit</code>。</p>
+<p>工作区可能包含四类状态：</p>
+<div class="table-scroll"><table>
+<thead>
+<tr>
+<th>状态</th>
+<th>含义</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Untracked</td>
+<td>文件存在，但从未进入当前 Git 历史</td>
+</tr>
+<tr>
+<td>Modified</td>
+<td>已跟踪文件的内容发生变化</td>
+</tr>
+<tr>
+<td>Deleted</td>
+<td>当前快照中存在，工作区里已删除</td>
+</tr>
+<tr>
+<td>Clean</td>
+<td>工作区与暂存区一致</td>
+</tr>
+</tbody></table></div>
+<p>注意，<code>untracked</code> 不代表 Git 不知道这个文件存在。Git 能在扫描工作区时看到它，只是当前提交和暂存区里没有它。</p>
+<h2 id="section-暂存区下一次提交的精确候选快照">暂存区：下一次提交的精确候选快照</h2>
+<p>暂存区也叫 Index。它不是一个普通的“待办列表”，而是一份准备写入下一个提交的目录结构。</p>
+<p>执行：</p>
+<pre><code class="language-bash">git add README.md
+</code></pre>
+<p>意味着：</p>
+<blockquote>
+<p>读取此刻 <code>README.md</code> 的内容，把它对应的对象和路径信息写入暂存区，作为下一次提交的一部分。</p>
+</blockquote>
+<p>如果你随后继续修改 <code>README.md</code>，会同时出现两份变化：</p>
+<pre><code class="language-text">HEAD 中的 README
+        │
+        ├── 已暂存版本：第一次 git add 时的内容
+        └── 工作区版本：后来继续修改后的内容
+</code></pre>
+<p>可以分别观察：</p>
+<pre><code class="language-bash"># 工作区相对暂存区还有什么变化
+git diff
+
+# 暂存区相对当前提交将提交什么
+git diff --staged
+</code></pre>
+<p>这解释了为什么一个文件可以同时出现在 <code>Changes to be committed</code> 和 <code>Changes not staged for commit</code> 中。</p>
+<p>暂存区的价值是让一次提交具有明确边界。例如你在同一个文件里：</p>
+<ul>
+<li>修复了一个空指针；</li>
+<li>顺手改了一个按钮文案。</li>
+</ul>
+<p>这两项工作不一定应该进入同一个提交。可以使用：</p>
+<pre><code class="language-bash">git add -p
+</code></pre>
+<p>逐个代码块决定是否加入暂存区。Git 的提交单位不是“保存时刻”，而是你主动选择的一组一致变化。</p>
+<h2 id="section-本地仓库git-目录中的对象和引用">本地仓库：<code>.git</code> 目录中的对象和引用</h2>
+<p>项目根目录下隐藏的 <code>.git</code> 是本地仓库的核心：</p>
+<pre><code class="language-text">.git/
+├── HEAD
+├── config
+├── index
+├── objects/
+├── refs/
+└── logs/
+</code></pre>
+<p>其中：</p>
+<ul>
+<li><code>objects/</code> 保存 Blob、Tree、Commit、Tag 等对象；</li>
+<li><code>refs/</code> 保存分支和标签指向哪个对象；</li>
+<li><code>HEAD</code> 指明当前位于哪个分支或提交；</li>
+<li><code>index</code> 是暂存区；</li>
+<li><code>config</code> 是当前仓库配置；</li>
+<li><code>logs/</code> 保存引用移动记录，也就是 Reflog 的主要数据。</li>
+</ul>
+<p>删除 <code>.git</code> 后，普通源文件仍在，但这个目录不再是 Git 仓库：</p>
+<pre><code class="language-bash">git status
+# fatal: not a git repository
+</code></pre>
+<p>丢失的不只是“日志”，还包括：</p>
+<ul>
+<li>所有本地提交；</li>
+<li>分支与标签；</li>
+<li>暂存区；</li>
+<li>远端地址；</li>
+<li>仓库级配置；</li>
+<li>Reflog 恢复线索。</li>
+</ul>
+<p>因此不要手工编辑或删除 <code>.git</code>。需要操作内部状态时，应优先使用 Git 命令。</p>
+<h2 id="section-提交不是保存差异而是登记一个快照节点">提交：不是“保存差异”，而是登记一个快照节点</h2>
+<p>执行：</p>
+<pre><code class="language-bash">git commit -m &quot;docs: explain Git areas&quot;
+</code></pre>
+<p>Git 会基于暂存区创建新提交。一个提交主要记录：</p>
+<pre><code class="language-text">tree        本次提交对应的根目录快照
+parent      父提交
+author      原始作者与时间
+committer   实际创建这个提交的人与时间
+message     提交说明
+</code></pre>
+<p>Git 展示“本次改了哪些行”时，通常是把该提交的快照与父提交快照比较后计算出来，而不是因为提交对象里保存了一份面向人类的逐行操作录像。</p>
+<p>例如：</p>
+<pre><code class="language-bash">git show HEAD
+</code></pre>
+<p>大致执行的是：</p>
+<pre><code class="language-text">读取 HEAD 提交
+→ 找到 parent
+→ 读取两边 Tree
+→ 比较对应 Blob
+→ 生成 diff
+</code></pre>
+<p>所以同一组快照可以用不同算法显示出不同形式的差异，但提交本身仍然是同一个对象。</p>
+<h2 id="section-远端仓库另一个可以交换对象和引用的-git-仓库">远端仓库：另一个可以交换对象和引用的 Git 仓库</h2>
+<p>GitHub、GitLab 或公司代码平台提供的是远端 Git 仓库及其周边协作能力。</p>
+<p>远端仓库不是本地仓库的一块实时同步磁盘。它是另一个独立仓库：</p>
+<pre><code class="language-text">本地仓库                           GitHub 仓库
+main ──► C3                        main ──► C2
+          │                                  │
+          └── 本地新提交 C3 尚未推送          └── 远端暂时不知道 C3
+</code></pre>
+<p>执行：</p>
+<pre><code class="language-bash">git push origin main
+</code></pre>
+<p>才会尝试把远端缺少的对象传过去，并把远端 <code>main</code> 从 <code>C2</code> 更新到 <code>C3</code>。</p>
+<p>执行：</p>
+<pre><code class="language-bash">git fetch origin
+</code></pre>
+<p>则把远端对象和引用状态下载到本地，更新类似 <code>origin/main</code> 的远端跟踪引用，但通常不会直接改你的工作区。</p>
+<p>GitHub 额外提供：</p>
+<ul>
+<li>Pull Request；</li>
+<li>Code Review；</li>
+<li>Issue；</li>
+<li>Actions；</li>
+<li>权限控制；</li>
+<li>网页查看提交与 Diff。</li>
+</ul>
+<p>这些不是 Git 核心协议本身。</p>
+<h2 id="section-git-status-为什么是最重要的安全命令"><code>git status</code> 为什么是最重要的安全命令</h2>
+<p>在不确定仓库状态时，第一条命令应当是：</p>
+<pre><code class="language-bash">git status --short --branch
+</code></pre>
+<p>示例：</p>
+<pre><code class="language-text">## main...origin/main [ahead 2, behind 1]
+ M README.md
+M  src/app.js
+?? notes.txt
+</code></pre>
+<p>含义是：</p>
+<ul>
+<li>本地 <code>main</code> 相对 <code>origin/main</code> 多 2 个提交、少 1 个提交；</li>
+<li><code>README.md</code> 只在工作区修改；</li>
+<li><code>src/app.js</code> 左侧是 <code>M</code>，表示变化已经暂存；</li>
+<li><code>notes.txt</code> 尚未跟踪。</li>
+</ul>
+<p>短格式的两列分别比较：</p>
+<pre><code class="language-text">第一列：暂存区 vs HEAD
+第二列：工作区 vs 暂存区
+</code></pre>
+<p>例如：</p>
+<pre><code class="language-text"> M file.txt   # 只改了工作区
+M  file.txt   # 已进入暂存区
+MM file.txt   # 已暂存后又继续修改
+A  file.txt   # 新文件已暂存
+?? file.txt   # 未跟踪
+</code></pre>
+<p>理解这两列，比背诵十条撤销命令更有用。</p>
+<h2 id="section-一次完整变化的生命周期">一次完整变化的生命周期</h2>
+<p>假设创建文件：</p>
+<pre><code class="language-bash">printf &quot;hello\n&quot; &gt; hello.txt
+</code></pre>
+<p>状态变化如下：</p>
+<pre><code class="language-text">1. 创建文件
+   工作区：hello.txt
+   暂存区：无
+   HEAD：无
+
+2. git add hello.txt
+   工作区：hello
+   暂存区：hello
+   HEAD：无
+
+3. git commit
+   工作区：hello
+   暂存区：hello
+   HEAD：hello
+
+4. 再修改为 hello world
+   工作区：hello world
+   暂存区：hello
+   HEAD：hello
+</code></pre>
+<p>每一步都可以通过以下命令验证：</p>
+<pre><code class="language-bash">git status
+git diff
+git diff --staged
+git show HEAD
+</code></pre>
+<h2 id="section-不要把保存文件和提交版本混在一起">不要把“保存文件”和“提交版本”混在一起</h2>
+<p>编辑器保存解决的是：</p>
+<blockquote>
+<p>内存中的编辑内容是否写入磁盘。</p>
+</blockquote>
+<p><code>git add</code> 解决的是：</p>
+<blockquote>
+<p>下一次提交准备包含哪个版本。</p>
+</blockquote>
+<p><code>git commit</code> 解决的是：</p>
+<blockquote>
+<p>是否创建一个有身份、时间、父节点和说明的历史节点。</p>
+</blockquote>
+<p><code>git push</code> 解决的是：</p>
+<blockquote>
+<p>是否把本地对象和引用更新发送给远端。</p>
+</blockquote>
+<p>四个动作彼此独立：</p>
+<pre><code class="language-text">编辑器 Save ≠ git add ≠ git commit ≠ git push
+</code></pre>
+<h2 id="section-最小实践">最小实践</h2>
+<p>在临时目录做一次实验：</p>
+<pre><code class="language-bash">mkdir git-area-lab
+cd git-area-lab
+git init
+
+printf &quot;v1\n&quot; &gt; demo.txt
+git status --short
+
+git add demo.txt
+git status --short
+
+printf &quot;v2\n&quot; &gt;&gt; demo.txt
+git status --short
+git diff
+git diff --staged
+</code></pre>
+<p>此时不要急着继续。先尝试回答：</p>
+<ol>
+<li>当前提交里有没有 <code>demo.txt</code>？</li>
+<li>下一次提交会得到 <code>v1</code> 还是 <code>v1 + v2</code>？</li>
+<li>工作区和暂存区分别保存了什么？</li>
+</ol>
+<p>答案是：</p>
+<ul>
+<li>还没有提交，所以当前历史没有 <code>demo.txt</code>；</li>
+<li>暂存区保存的是第一次 <code>git add</code> 时的 <code>v1</code>；</li>
+<li>工作区包含后来追加的 <code>v2</code>。</li>
+</ul>
+<p>这就是 Git 后续所有复杂操作的起点：先判断对象位于哪个区域，再决定要移动哪一个状态。</p>
+
+    </article>
+  </main>
+
+  <footer class="site-footer article-footer">
+    <a href="../sections/git.html">Git 学习与实践 / 基础模型</a>
+    <a href="https://github.com/yjd953/yjd953/blob/main/posts/git-mental-model.md">View source ↗</a>
+  </footer>
+  <script src="../assets/site.js" defer></script>
+</body>
+</html>

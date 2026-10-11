@@ -29,6 +29,9 @@ Program execution, CPU and memory, processes, networks, compilers, filesystems, 
 **03 / [Backend Foundations](https://yjd953.github.io/yjd953/sections/backend.html)**<br>
 Java, Go, JVM, Redis, MySQL, MQ, networking, and distributed systems.
 
+**04 / [Git Learning and Practice](https://yjd953.github.io/yjd953/sections/git.html)**<br>
+Objects, commits, branches, collaboration, history inspection, recovery, repository hygiene, identity, and privacy.
+
 ## Activity
 
 <picture>

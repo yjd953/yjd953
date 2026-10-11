@@ -1,0 +1,380 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="把好提交和坏提交交给 Git，通过二分搜索和自动化测试定位回归来源。">
+  <meta name="theme-color" content="#f1f1ee">
+  <title>怎样用 Git Bisect 定位引入 Bug 的提交？ — Dale Yang</title>
+  <link rel="stylesheet" href="../assets/site.css">
+</head>
+<body class="article-page">
+  <div class="reading-progress" id="readingProgress" aria-hidden="true"></div>
+
+  <header class="site-header">
+    <a class="wordmark" href="../" aria-label="Dale Yang home">DY<span>.</span></a>
+    <nav aria-label="Primary">
+      <a href="../sections/git.html">Git 学习与实践</a>
+      <a href="https://github.com/yjd953">GitHub</a>
+    </nav>
+  </header>
+
+  <main class="article-layout">
+    <header class="article-masthead">
+      <a class="back-link" href="../sections/git.html">← Git 学习与实践</a>
+      <p class="kicker">04.12 / Debugging / ZH</p>
+      <h1>怎样用 Git Bisect 定位引入 Bug 的提交？</h1>
+      <p class="article-deck">把好提交和坏提交交给 Git，通过二分搜索和自动化测试定位回归来源。</p>
+    </header>
+
+    <article class="prose">
+      <p>当项目有几百个提交，而你只知道：</p>
+<pre><code class="language-text">三个月前正常，现在失败
+</code></pre>
+<p>逐个提交检查的成本很高。<code>git bisect</code> 利用提交图做二分搜索：</p>
+<pre><code class="language-text">已知 good ─────────────── 已知 bad
+                 ▲
+              检查中点
+</code></pre>
+<p>每次判断当前提交是 Good 还是 Bad，Git 就排除一半候选。若有 1024 个线性候选，理论上约 10 次判断就能定位。</p>
+<h2 id="section-bisect-需要一个可判定问题">Bisect 需要一个可判定问题</h2>
+<p>首先定义：</p>
+<ul>
+<li>Good：行为正常的提交；</li>
+<li>Bad：行为异常的提交。</li>
+</ul>
+<p>例如：</p>
+<pre><code class="language-text">Good：单元测试 testUploadRetry 通过
+Bad：单元测试失败
+</code></pre>
+<p>或：</p>
+<pre><code class="language-text">Good：页面首屏小于 2 秒
+Bad：页面首屏大于等于 2 秒
+</code></pre>
+<p>判定必须尽量：</p>
+<ul>
+<li>可重复；</li>
+<li>不依赖人工感觉；</li>
+<li>不受随机数据干扰；</li>
+<li>能在历史版本上运行。</li>
+</ul>
+<p>如果测试本身不稳定，Bisect 会根据错误标签排除真正根因。</p>
+<h2 id="section-手工-bisect-流程">手工 Bisect 流程</h2>
+<p>当前版本有 Bug：</p>
+<pre><code class="language-bash">git bisect start
+git bisect bad
+</code></pre>
+<p>指定一个已知正常版本：</p>
+<pre><code class="language-bash">git bisect good v1.2.0
+</code></pre>
+<p>Git 检出候选提交，进入 Detached HEAD。</p>
+<p>运行验证：</p>
+<pre><code class="language-bash">npm test -- upload-retry
+</code></pre>
+<p>通过：</p>
+<pre><code class="language-bash">git bisect good
+</code></pre>
+<p>失败：</p>
+<pre><code class="language-bash">git bisect bad
+</code></pre>
+<p>Git 继续选择下一个候选。最后输出：</p>
+<pre><code class="language-text">abc123 is the first bad commit
+</code></pre>
+<p>结束并回到原分支：</p>
+<pre><code class="language-bash">git bisect reset
+</code></pre>
+<p>不要忘记 Reset，否则仍停留在 Bisect 检出的提交。</p>
+<h2 id="section-为什么它不一定选择中间日期">为什么它不一定选择“中间日期”</h2>
+<p>Git 历史是一张图，不是按时间排序的数组。Bisect 根据可达提交图选择能最大化排除候选的节点。</p>
+<p>存在 Merge 时：</p>
+<pre><code class="language-text">          D ← E
+         ↗     ↘
+A ← B ← C       M ← N
+         ↘     ↗
+          F ← G
+</code></pre>
+<p>候选选择需要考虑祖先关系，而不是简单按 Commit Date 取中间。</p>
+<p>提交时间还可能因为：</p>
+<ul>
+<li>Rebase；</li>
+<li>Cherry-pick；</li>
+<li>时区；</li>
+<li>修改系统时间；</li>
+</ul>
+<p>与图位置不一致。</p>
+<h2 id="section-自动-bisect">自动 Bisect</h2>
+<p>如果测试命令能用退出码表示结果：</p>
+<pre><code class="language-bash">git bisect start HEAD v1.2.0
+git bisect run npm test -- upload-retry
+</code></pre>
+<p>Git 约定：</p>
+<div class="table-scroll"><table>
+<thead>
+<tr>
+<th>退出码</th>
+<th>含义</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>0</code></td>
+<td>Good</td>
+</tr>
+<tr>
+<td><code>1-127</code>，除 <code>125</code></td>
+<td>Bad</td>
+</tr>
+<tr>
+<td><code>125</code></td>
+<td>Skip，当前提交无法测试</td>
+</tr>
+</tbody></table></div>
+<p>测试脚本示例：</p>
+<pre><code class="language-bash">#!/usr/bin/env bash
+set -e
+
+npm ci
+npm test -- upload-retry
+</code></pre>
+<p>保存为临时脚本后：</p>
+<pre><code class="language-bash">git bisect run ./bisect-test.sh
+</code></pre>
+<p>自动化前要确认脚本不会：</p>
+<ul>
+<li>修改历史；</li>
+<li>推送远端；</li>
+<li>删除重要数据；</li>
+<li>依赖工作区残留；</li>
+<li>把构建失败误判为产品 Bug。</li>
+</ul>
+<h2 id="section-build-失败不一定等于-bad">Build 失败不一定等于 Bad</h2>
+<p>历史版本可能因为环境变化无法构建：</p>
+<ul>
+<li>旧依赖下线；</li>
+<li>编译器不兼容；</li>
+<li>测试命令尚未存在；</li>
+<li>数据迁移缺失。</li>
+</ul>
+<p>如果这类提交与目标 Bug 无关，应返回 125：</p>
+<pre><code class="language-bash">#!/usr/bin/env bash
+
+if ! npm ci; then
+  exit 125
+fi
+
+if npm test -- upload-retry; then
+  exit 0
+else
+  exit 1
+fi
+</code></pre>
+<p>大量 Skip 会降低定位效率，甚至产生多个可能结果。可以：</p>
+<ul>
+<li>缩小范围；</li>
+<li>修复历史测试环境；</li>
+<li>使用容器固定工具链；</li>
+<li>换一个更稳定的判定信号。</li>
+</ul>
+<h2 id="section-测试脚本在历史里不存在怎么办">测试脚本在历史里不存在怎么办</h2>
+<p>Bisect 每次切换提交，仓库内脚本也会跟着变化。如果把诊断脚本放在项目目录并未提交，它可能被清理或被旧版本路径影响。</p>
+<p>可以把脚本放到仓库外：</p>
+<pre><code class="language-bash">git bisect run /tmp/project-bisect-test.sh
+</code></pre>
+<p>脚本应根据当前检出版本运行兼容命令。</p>
+<p>或者先创建测试提交，把回归测试放进历史，再使用 <code>--no-checkout</code> 或专门 Worktree 进行高级排查。但要注意新测试是否能在旧版本编译。</p>
+<h2 id="section-用现有测试定位回归">用现有测试定位回归</h2>
+<p>理想情况：</p>
+<pre><code class="language-bash">git bisect start HEAD &lt;known-good&gt;
+git bisect run ./gradlew test --tests UploadRetryTest
+</code></pre>
+<p>不要每轮运行整个项目全部测试，除非没有更小的可靠信号。Bisect 成本约为：</p>
+<pre><code class="language-text">测试次数 × 单次构建测试时间
+</code></pre>
+<p>优化顺序：</p>
+<ol>
+<li>最小失败测试；</li>
+<li>增量构建；</li>
+<li>固定依赖缓存；</li>
+<li>独立测试数据；</li>
+<li>必要时并行准备环境，但不要同时修改同一 Worktree。</li>
+</ol>
+<h2 id="section-性能回归的-bisect">性能回归的 Bisect</h2>
+<p>性能有噪声，不能单次超过阈值就判 Bad。</p>
+<p>脚本可以：</p>
+<ol>
+<li>预热；</li>
+<li>运行多次；</li>
+<li>取中位数；</li>
+<li>排除异常值；</li>
+<li>与稳定阈值比较。</li>
+</ol>
+<p>伪代码：</p>
+<pre><code class="language-bash">scores=$(run_benchmark_7_times)
+median=$(calculate_median &quot;$scores&quot;)
+
+if (( median &lt; 200 )); then
+  exit 0
+else
+  exit 1
+fi
+</code></pre>
+<p>如果 Good/Bad 分布重叠严重，二分结论不可靠。应先降低测量噪声。</p>
+<h2 id="section-非单调问题会破坏-bisect-假设">非单调问题会破坏 Bisect 假设</h2>
+<p>Bisect 隐含假设：</p>
+<pre><code class="language-text">Good Good Good Bad Bad Bad
+</code></pre>
+<p>即某个提交首次引入问题，后续一直存在。</p>
+<p>如果历史是：</p>
+<pre><code class="language-text">Good Bad Good Bad Good Bad
+</code></pre>
+<p>例如 Bug 被引入、修复、再次引入，单次 Bisect 只能定位当前 Good/Bad 边界中的某个变化。</p>
+<p>应：</p>
+<ul>
+<li>缩小版本范围；</li>
+<li>明确要找“首次引入”还是“最近再次引入”；</li>
+<li>检查 Revert 和 Cherry-pick；</li>
+<li>对多个区间分别 Bisect。</li>
+</ul>
+<h2 id="section-merge-历史中的归因">Merge 历史中的归因</h2>
+<p>如果第一个 Bad 是 Merge Commit：</p>
+<pre><code class="language-text">feature 分支单独测试正常
+main 单独测试正常
+合并结果失败
+</code></pre>
+<p>问题可能来自：</p>
+<ul>
+<li>冲突解决错误；</li>
+<li>两侧组合后不兼容；</li>
+<li>Merge Commit 中手工修改；</li>
+<li>测试环境变化。</li>
+</ul>
+<p>不要立即把责任归到某个父分支。检查：</p>
+<pre><code class="language-bash">git show -m &lt;merge&gt;
+git diff &lt;merge&gt;^1 &lt;merge&gt;
+git diff &lt;merge&gt;^2 &lt;merge&gt;
+</code></pre>
+<p>分别测试父提交和合并 Tree。</p>
+<h2 id="section-first-parent-与发布主线"><code>--first-parent</code> 与发布主线</h2>
+<p>大型仓库可能希望先定位“哪个 PR 合入后主干坏了”，而不是直接进入功能分支内部。</p>
+<p>先沿 First-parent 查看：</p>
+<pre><code class="language-bash">git log --first-parent --oneline main
+</code></pre>
+<p>找到可疑 Merge 后，再在该功能分支范围进行第二轮 Bisect。</p>
+<p>Bisect 本身有复杂路径选项，但实践中分两层定位往往更容易解释：</p>
+<pre><code class="language-text">第一层：哪个集成节点引入回归
+第二层：该 PR 内哪个提交引入问题
+</code></pre>
+<h2 id="section-bisect-过程状态在哪里">Bisect 过程状态在哪里</h2>
+<p>Bisect 使用内部引用记录 Good/Bad 和当前状态。</p>
+<p>查看：</p>
+<pre><code class="language-bash">git bisect log
+</code></pre>
+<p>保存：</p>
+<pre><code class="language-bash">git bisect log &gt; /tmp/bisect.log
+</code></pre>
+<p>重放：</p>
+<pre><code class="language-bash">git bisect replay /tmp/bisect.log
+</code></pre>
+<p>这有助于：</p>
+<ul>
+<li>分享排查过程；</li>
+<li>修正某次误判；</li>
+<li>在另一环境复现；</li>
+<li>记录事故证据。</li>
+</ul>
+<h2 id="section-误标后怎么处理">误标后怎么处理</h2>
+<p>如果某次把 Bad 标成 Good，可以：</p>
+<pre><code class="language-bash">git bisect log
+</code></pre>
+<p>结束：</p>
+<pre><code class="language-bash">git bisect reset
+</code></pre>
+<p>编辑日志，删除或修正错误步骤，然后：</p>
+<pre><code class="language-bash">git bisect replay corrected.log
+</code></pre>
+<p>比盲目继续更可靠。</p>
+<h2 id="section-bisect-找到提交以后">Bisect 找到提交以后</h2>
+<p>定位 <code>abc123</code> 后：</p>
+<pre><code class="language-bash">git show --stat --format=fuller abc123
+git show abc123
+git blame &lt;affected-file&gt;
+</code></pre>
+<p>接着验证因果：</p>
+<ol>
+<li>在父提交运行测试，确认 Good；</li>
+<li>在目标提交运行，确认 Bad；</li>
+<li>理解哪一处变化导致行为；</li>
+<li>尝试 Revert 或最小修复；</li>
+<li>在最新主干验证修复；</li>
+<li>增加防回归测试。</li>
+</ol>
+<p>Bisect 只证明该区间中“第一个被判为 Bad 的提交”，不自动证明作者、某一行或设计决定就是根因。</p>
+<h2 id="section-与-log-sblame-怎样配合">与 <code>log -S</code>、<code>blame</code> 怎样配合</h2>
+<p>如果已经知道可疑符号：</p>
+<pre><code class="language-bash">git log -S&#39;unsafeRetry&#39; -p
+</code></pre>
+<p>可能比 Bisect 更快。</p>
+<p>如果知道当前错误行：</p>
+<pre><code class="language-bash">git blame -L 80,100 src/retry.ts
+</code></pre>
+<p>可以直接找到最后变化。</p>
+<p>选择：</p>
+<div class="table-scroll"><table>
+<thead>
+<tr>
+<th>已知信息</th>
+<th>工具</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>知道错误行</td>
+<td><code>blame</code> + <code>show</code></td>
+</tr>
+<tr>
+<td>知道字符串或函数</td>
+<td><code>log -S/-G/-L</code></td>
+</tr>
+<tr>
+<td>只知道某版本好、某版本坏</td>
+<td><code>bisect</code></td>
+</tr>
+<tr>
+<td>想知道文件完整演化</td>
+<td><code>log -p --follow</code></td>
+</tr>
+</tbody></table></div>
+<h2 id="section-最小自动化实验">最小自动化实验</h2>
+<p>创建一串提交，其中某次把正确值改坏：</p>
+<pre><code class="language-bash">mkdir git-bisect-lab
+cd git-bisect-lab
+git init
+
+for n in 1 2 3 4 5 6 7 8; do
+  value=42
+  if [ &quot;$n&quot; -ge 6 ]; then value=0; fi
+  printf &#39;%s\n&#39; &quot;$value&quot; &gt; value.txt
+  git add value.txt
+  git commit -m &quot;step $n&quot;
+done
+</code></pre>
+<p>仓库外创建 <code>/tmp/check-value.sh</code>：</p>
+<pre><code class="language-bash">#!/usr/bin/env bash
+test &quot;$(cat value.txt)&quot; = &quot;42&quot;
+</code></pre>
+<p>授权并运行：</p>
+<pre><code class="language-bash">chmod +x /tmp/check-value.sh
+git bisect start HEAD HEAD~7
+git bisect run /tmp/check-value.sh
+git bisect reset
+</code></pre>
+<p>Git 会定位第 6 个提交。这个实验展示了 Bisect 的核心：Git 负责搜索提交图，你负责提供可信的 Good/Bad 判定函数。</p>
+
+    </article>
+  </main>
+
+  <footer class="site-footer article-footer">
+    <a href="../sections/git.html">Git 学习与实践 / 进阶工具</a>
+    <a href="https://github.com/yjd953/yjd953/blob/main/posts/git-bisect-debugging.md">View source ↗</a>
+  </footer>
+  <script src="../assets/site.js" defer></script>
+</body>
+</html>

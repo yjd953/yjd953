@@ -30,6 +30,9 @@ Programmausführung, CPU und Speicher, Prozesse, Netzwerke, Compiler, Dateisyste
 **03 / [Backend-Grundlagen](https://yjd953.github.io/yjd953/sections/backend.html)**<br>
 Java, Go, JVM, Redis, MySQL, MQ, Netzwerke und verteilte Systeme.
 
+**04 / [Git lernen und anwenden](https://yjd953.github.io/yjd953/sections/git.html)**<br>
+Objekte, Commits, Branches, Zusammenarbeit, Historienanalyse, Wiederherstellung, Repository-Pflege, Identität und Datenschutz.
+
 ## Aktivität
 
 <picture>

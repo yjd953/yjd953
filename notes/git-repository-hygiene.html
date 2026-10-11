@@ -1,0 +1,430 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="处理忽略规则、换行、二进制文件、大文件、生成物和提交前检查。">
+  <meta name="theme-color" content="#f1f1ee">
+  <title>怎样保持一个 Git 仓库长期干净？ — Dale Yang</title>
+  <link rel="stylesheet" href="../assets/site.css">
+</head>
+<body class="article-page">
+  <div class="reading-progress" id="readingProgress" aria-hidden="true"></div>
+
+  <header class="site-header">
+    <a class="wordmark" href="../" aria-label="Dale Yang home">DY<span>.</span></a>
+    <nav aria-label="Primary">
+      <a href="../sections/git.html">Git 学习与实践</a>
+      <a href="https://github.com/yjd953">GitHub</a>
+    </nav>
+  </header>
+
+  <main class="article-layout">
+    <header class="article-masthead">
+      <a class="back-link" href="../sections/git.html">← Git 学习与实践</a>
+      <p class="kicker">04.13 / Repository hygiene / ZH</p>
+      <h1>怎样保持一个 Git 仓库长期干净？</h1>
+      <p class="article-deck">处理忽略规则、换行、二进制文件、大文件、生成物和提交前检查。</p>
+    </header>
+
+    <article class="prose">
+      <p>仓库卫生不是“文件排列整齐”，而是让版本库长期保持：</p>
+<ul>
+<li>Clone 体积可控；</li>
+<li>Diff 可读；</li>
+<li>构建可重复；</li>
+<li>本地环境不泄露；</li>
+<li>二进制和生成物边界清晰；</li>
+<li>不同操作系统协作稳定；</li>
+<li>敏感信息不进入历史。</li>
+</ul>
+<p>一个仓库刚创建时问题很少，几年后常见负担来自：</p>
+<ul>
+<li><code>node_modules</code>、构建目录进入历史；</li>
+<li>大型二进制反复更新；</li>
+<li>CRLF/LF 导致全文件变化；</li>
+<li><code>.env</code>、证书、密钥误提交；</li>
+<li>IDE 和系统文件污染；</li>
+<li>生成代码和源代码混在一起；</li>
+<li>依赖锁文件策略不一致；</li>
+<li>历史中删除的大文件仍占空间。</li>
+</ul>
+<h2 id="section-gitignore只控制未跟踪路径"><code>.gitignore</code>：只控制未跟踪路径</h2>
+<p>示例：</p>
+<pre><code class="language-gitignore"># dependencies
+node_modules/
+
+# build output
+dist/
+build/
+
+# local environment
+.env
+.env.local
+
+# IDE and OS
+.idea/
+.vscode/
+.DS_Store
+
+# logs
+*.log
+</code></pre>
+<p>检查某路径为什么被忽略：</p>
+<pre><code class="language-bash">git check-ignore -v path/to/file
+</code></pre>
+<p>列出被忽略文件：</p>
+<pre><code class="language-bash">git status --ignored --short
+</code></pre>
+<p>规则来源可能包括：</p>
+<ul>
+<li>仓库 <code>.gitignore</code>；</li>
+<li>子目录 <code>.gitignore</code>；</li>
+<li><code>.git/info/exclude</code>；</li>
+<li>用户全局 excludesfile。</li>
+</ul>
+<p>只适用于当前仓库但不应提交的个人规则，放：</p>
+<pre><code class="language-text">.git/info/exclude
+</code></pre>
+<p>不要把个人 IDE 偏好强加给整个团队，除非团队明确共享配置。</p>
+<h2 id="section-已跟踪文件不会因-gitignore-自动消失">已跟踪文件不会因 <code>.gitignore</code> 自动消失</h2>
+<p>如果 <code>.env</code> 已被跟踪，再添加规则仍会继续出现在修改列表。</p>
+<p>停止未来跟踪但保留本地文件：</p>
+<pre><code class="language-bash">git rm --cached .env
+git commit -m &quot;chore: stop tracking local environment&quot;
+</code></pre>
+<p>目录：</p>
+<pre><code class="language-bash">git rm -r --cached dist/
+</code></pre>
+<p>这只影响新提交。旧历史仍包含文件内容。</p>
+<p>如果里面有凭证：</p>
+<ol>
+<li>立即吊销和轮换；</li>
+<li>调查暴露范围；</li>
+<li>再决定是否改写历史。</li>
+</ol>
+<p>不要先花几小时清 Git 历史，却让旧密钥仍然有效。</p>
+<h2 id="section-ignore-规则的匹配">Ignore 规则的匹配</h2>
+<pre><code class="language-gitignore">*.log          # 任意层级的 .log
+/build/        # 只匹配仓库根 build
+build/         # 可匹配任意层级 build 目录
+temp/*         # temp 直接子项
+!temp/keep.md  # 尝试重新包含
+</code></pre>
+<p>重新包含有一个常见陷阱：如果父目录本身已经被完整排除，Git 可能不会继续遍历其子项。需要逐层放开：</p>
+<pre><code class="language-gitignore">temp/*
+!temp/docs/
+temp/docs/*
+!temp/docs/keep.md
+</code></pre>
+<p>规则越复杂，越应使用 <code>git check-ignore -v</code> 验证，不要凭猜测。</p>
+<h2 id="section-gitattributes声明内容怎样被-git-处理"><code>.gitattributes</code>：声明内容怎样被 Git 处理</h2>
+<p><code>.gitignore</code> 决定是否跟踪，<code>.gitattributes</code> 决定已跟踪内容的属性。</p>
+<p>示例：</p>
+<pre><code class="language-gitattributes">* text=auto
+*.sh text eol=lf
+*.bat text eol=crlf
+*.png binary
+*.jpg binary
+*.pdf binary
+</code></pre>
+<p>常见用途：</p>
+<ul>
+<li>统一换行；</li>
+<li>标记二进制；</li>
+<li>指定 Diff Driver；</li>
+<li>指定 Merge Driver；</li>
+<li>Git LFS 跟踪；</li>
+<li>控制 <code>git archive</code> 导出。</li>
+</ul>
+<p>查看：</p>
+<pre><code class="language-bash">git check-attr -a -- path/to/file
+</code></pre>
+<h2 id="section-换行为什么会制造全文件-diff">换行为什么会制造全文件 Diff</h2>
+<p>Unix 常用 LF：</p>
+<pre><code class="language-text">\n
+</code></pre>
+<p>Windows 常用 CRLF：</p>
+<pre><code class="language-text">\r\n
+</code></pre>
+<p>如果工具把整文件从 LF 改为 CRLF，Git 可能显示每一行都变化，淹没真实修改。</p>
+<p>仓库可以明确：</p>
+<pre><code class="language-gitattributes">* text=auto
+*.sh text eol=lf
+*.bat text eol=crlf
+</code></pre>
+<p>新增规则后规范化：</p>
+<pre><code class="language-bash">git add --renormalize .
+git diff --staged
+</code></pre>
+<p>这可能产生大范围变化，应单独提交，并与团队协调，避免和功能修改混在一起。</p>
+<p>不要在不了解公司仓库规范时随意修改全局 <code>core.autocrlf</code>。仓库级 <code>.gitattributes</code> 更容易共享和审查。</p>
+<h2 id="section-二进制文件为什么不适合普通-git-diff">二进制文件为什么不适合普通 Git Diff</h2>
+<p>源码变化通常可按行压缩和合并；压缩包、图片、视频、数据库文件常表现为整体变化。</p>
+<p>问题：</p>
+<ul>
+<li>Diff 不可读；</li>
+<li>每个版本可能占大量空间；</li>
+<li>无法可靠三方合并；</li>
+<li>Clone 会下载整个可达历史；</li>
+<li>删除当前文件不减少旧历史体积。</li>
+</ul>
+<p>先问：</p>
+<ol>
+<li>它是源资产还是生成物？</li>
+<li>能否从源码和构建过程重新生成？</li>
+<li>是否需要历史版本？</li>
+<li>是否应该放制品仓库或对象存储？</li>
+<li>是否适合 Git LFS？</li>
+</ol>
+<p>通常：</p>
+<pre><code class="language-text">源代码、配置、迁移脚本 → Git
+构建产物、APK、ZIP、日志 → Release/制品系统
+大型设计资产 → Git LFS 或专用资产系统
+数据库备份 → 备份系统，不进 Git
+</code></pre>
+<h2 id="section-git-lfs-的工作方式">Git LFS 的工作方式</h2>
+<p>Git LFS 在普通 Git 历史中保存一个小指针：</p>
+<pre><code class="language-text">version https://git-lfs.github.com/spec/v1
+oid sha256:...
+size 123456789
+</code></pre>
+<p>真实大文件保存在 LFS 服务。</p>
+<p>配置：</p>
+<pre><code class="language-bash">git lfs install
+git lfs track &quot;*.psd&quot;
+git add .gitattributes
+</code></pre>
+<p>注意：</p>
+<ul>
+<li>团队所有环境需要 LFS 支持；</li>
+<li>托管平台可能有流量和存储额度；</li>
+<li>把已有历史迁移到 LFS 会改写历史；</li>
+<li>LFS 不适合秘密文件；</li>
+<li>删除 LFS 指针不一定立即删除服务器对象。</li>
+</ul>
+<h2 id="section-生成物是否提交">生成物是否提交</h2>
+<p>默认不提交能稳定生成的构建产物：</p>
+<pre><code class="language-text">dist/
+coverage/
+target/
+build/
+*.class
+*.o
+</code></pre>
+<p>但某些场景需要提交生成物：</p>
+<ul>
+<li>代码生成结果参与下游编译；</li>
+<li>文档站托管要求；</li>
+<li>供应商代码；</li>
+<li>发布流程无法现场生成。</li>
+</ul>
+<p>若必须提交：</p>
+<ul>
+<li>生成命令固定；</li>
+<li>生成器版本锁定；</li>
+<li>生成物与源变更一起 Review；</li>
+<li>CI 验证重新生成后无 Diff；</li>
+<li>尽量放独立目录；</li>
+<li>避免手工编辑。</li>
+</ul>
+<h2 id="section-依赖锁文件">依赖锁文件</h2>
+<p>锁文件是否提交取决于生态与项目类型，但应用项目通常需要可重复依赖解析。</p>
+<p>常见：</p>
+<pre><code class="language-text">package-lock.json
+pnpm-lock.yaml
+yarn.lock
+Cargo.lock
+poetry.lock
+go.sum
+</code></pre>
+<p>原则：</p>
+<ul>
+<li>团队只使用一种包管理器；</li>
+<li>不随意删除并重建锁文件；</li>
+<li>依赖升级单独提交；</li>
+<li>Review 实际版本变化；</li>
+<li>CI 使用锁定安装模式。</li>
+</ul>
+<p>锁文件冲突不要简单全选一侧。通常应先合并声明文件，再用指定包管理器重新生成并验证。</p>
+<h2 id="section-可执行位与文件模式">可执行位与文件模式</h2>
+<p>Git 跟踪普通文件的可执行位。</p>
+<p>查看：</p>
+<pre><code class="language-bash">git diff --summary
+</code></pre>
+<p>可能看到：</p>
+<pre><code class="language-text">mode change 100644 =&gt; 100755 scripts/build.sh
+</code></pre>
+<p>如果操作系统或文件系统导致无意义模式变化，应先调查，不要全局关闭检查来掩盖真实问题。</p>
+<p>正确设置：</p>
+<pre><code class="language-bash">chmod +x scripts/build.sh
+git add scripts/build.sh
+</code></pre>
+<h2 id="section-符号链接与跨平台">符号链接与跨平台</h2>
+<p>Git 可以把符号链接目标作为特殊 Blob 跟踪。不同操作系统、权限和 Git 配置对检出支持不同。</p>
+<p>使用前确认：</p>
+<ul>
+<li>Windows 开发环境是否能创建；</li>
+<li>CI 是否保留；</li>
+<li>打包工具如何处理；</li>
+<li>链接是否逃出仓库；</li>
+<li>安全扫描是否跟随。</li>
+</ul>
+<p>跨平台项目若不需要符号链接，普通脚本或构建配置可能更稳定。</p>
+<h2 id="section-仓库大小从哪里来">仓库大小从哪里来</h2>
+<p>当前工作区大小不是仓库历史大小。</p>
+<p>检查：</p>
+<pre><code class="language-bash">du -sh .git
+git count-objects -vH
+</code></pre>
+<p>列出 Pack 中大对象需要更复杂的对象分析。基本思路：</p>
+<pre><code class="language-bash">git verify-pack -v .git/objects/pack/*.idx
+</code></pre>
+<p>结合：</p>
+<pre><code class="language-bash">git rev-list --objects --all
+</code></pre>
+<p>把对象 ID 映射回历史路径。</p>
+<p>大型仓库优先使用成熟工具分析，例如：</p>
+<ul>
+<li><code>git filter-repo --analyze</code>；</li>
+<li>平台仓库分析功能；</li>
+<li>专门的大对象报告脚本。</li>
+</ul>
+<p>不要直接删除 <code>.git/objects</code> 下文件。</p>
+<h2 id="section-提交前检查">提交前检查</h2>
+<p>最小人工检查：</p>
+<pre><code class="language-bash">git status --short
+git diff
+git diff --staged
+git diff --staged --check
+</code></pre>
+<p><code>--check</code> 可以发现：</p>
+<ul>
+<li>行尾空白；</li>
+<li>空白错误；</li>
+<li>冲突标记问题。</li>
+</ul>
+<p>自动化可以加入：</p>
+<ul>
+<li>Formatter；</li>
+<li>Linter；</li>
+<li>Unit Test；</li>
+<li>Secret Scanner；</li>
+<li>大文件阈值；</li>
+<li>文件名规则；</li>
+<li>License 检查。</li>
+</ul>
+<p>但 Hook 不是绝对安全边界：</p>
+<ul>
+<li>可以被跳过；</li>
+<li>新环境可能未安装；</li>
+<li>恶意提交者可以绕过。</li>
+</ul>
+<p>关键规则还应在 CI 和服务端保护。</p>
+<h2 id="section-secret-scanner-的边界">Secret Scanner 的边界</h2>
+<p>扫描器能发现：</p>
+<ul>
+<li>已知 Token 格式；</li>
+<li>私钥 Header；</li>
+<li>高熵字符串；</li>
+<li>常见配置字段。</li>
+</ul>
+<p>但会有：</p>
+<ul>
+<li>误报；</li>
+<li>漏报；</li>
+<li>测试样例与真实凭证难区分；</li>
+<li>自定义内部密钥格式未知。</li>
+</ul>
+<p>因此还需要：</p>
+<ul>
+<li>Secret Manager；</li>
+<li>短期凭证；</li>
+<li>最小权限；</li>
+<li>自动轮换；</li>
+<li>环境变量或受控文件注入；</li>
+<li>日志脱敏。</li>
+</ul>
+<h2 id="section-仓库根目录建议">仓库根目录建议</h2>
+<p>不是所有项目都必须相同，但通常应能快速找到：</p>
+<pre><code class="language-text">README.md
+LICENSE
+.gitignore
+.gitattributes
+CONTRIBUTING.md
+SECURITY.md
+src/
+tests/
+docs/
+scripts/
+</code></pre>
+<p>README 至少说明：</p>
+<ul>
+<li>项目是什么；</li>
+<li>如何安装；</li>
+<li>如何运行；</li>
+<li>如何测试；</li>
+<li>关键目录；</li>
+<li>配置从哪里来；</li>
+<li>如何贡献。</li>
+</ul>
+<p>不要把长期有效知识只放在某个人的本机脚本或聊天记录中。</p>
+<h2 id="section-定期维护">定期维护</h2>
+<p>Git 通常会自动运行维护。可以观察：</p>
+<pre><code class="language-bash">git count-objects -vH
+git fsck
+</code></pre>
+<p>大型活跃仓库可使用：</p>
+<pre><code class="language-bash">git maintenance start
+</code></pre>
+<p>具体能力取决于 Git 版本。</p>
+<p>手动：</p>
+<pre><code class="language-bash">git gc
+</code></pre>
+<p>会整理对象并按策略清理。不要在刚发生误删、还想依赖 Reflog 恢复时急着执行激进 Prune。</p>
+<h2 id="section-一份仓库卫生清单">一份仓库卫生清单</h2>
+<h3 id="section-路径边界">路径边界</h3>
+<ul>
+<li><input disabled type="checkbox"> 依赖目录不进入 Git；</li>
+<li><input disabled type="checkbox"> 构建产物有明确去处；</li>
+<li><input disabled type="checkbox"> 本地配置与模板分离；</li>
+<li><input disabled type="checkbox"> IDE/OS 文件被正确排除。</li>
+</ul>
+<h3 id="section-文本一致性">文本一致性</h3>
+<ul>
+<li><input disabled type="checkbox"> <code>.gitattributes</code> 明确换行策略；</li>
+<li><input disabled type="checkbox"> 格式化独立于功能变更；</li>
+<li><input disabled type="checkbox"> 二进制文件已标记或迁移。</li>
+</ul>
+<h3 id="section-依赖与构建">依赖与构建</h3>
+<ul>
+<li><input disabled type="checkbox"> 锁文件策略一致；</li>
+<li><input disabled type="checkbox"> 构建命令可重复；</li>
+<li><input disabled type="checkbox"> 生成物能由 CI 验证。</li>
+</ul>
+<h3 id="section-安全">安全</h3>
+<ul>
+<li><input disabled type="checkbox"> 私钥和 Token 不进入仓库；</li>
+<li><input disabled type="checkbox"> Secret Scan 在 CI 运行；</li>
+<li><input disabled type="checkbox"> 泄露凭证有轮换流程；</li>
+<li><input disabled type="checkbox"> 提交身份与隐私策略明确。</li>
+</ul>
+<h3 id="section-历史">历史</h3>
+<ul>
+<li><input disabled type="checkbox"> 大文件没有反复进入历史；</li>
+<li><input disabled type="checkbox"> 分支和 Tag 定期清理；</li>
+<li><input disabled type="checkbox"> 历史改写有团队流程；</li>
+<li><input disabled type="checkbox"> Reflog 不被当成备份。</li>
+</ul>
+<p>仓库卫生的核心不是追求零文件或零历史，而是让每一种内容出现在正确的系统、以正确的生命周期被管理。</p>
+
+    </article>
+  </main>
+
+  <footer class="site-footer article-footer">
+    <a href="../sections/git.html">Git 学习与实践 / 工程治理</a>
+    <a href="https://github.com/yjd953/yjd953/blob/main/posts/git-repository-hygiene.md">View source ↗</a>
+  </footer>
+  <script src="../assets/site.js" defer></script>
+</body>
+</html>

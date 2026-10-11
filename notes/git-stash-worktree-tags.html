@@ -1,0 +1,357 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="管理临时修改、并行工作目录和稳定发布标记，避免把不同任务混在一起。">
+  <meta name="theme-color" content="#f1f1ee">
+  <title>Stash、Worktree 和 Tag 分别解决什么问题？ — Dale Yang</title>
+  <link rel="stylesheet" href="../assets/site.css">
+</head>
+<body class="article-page">
+  <div class="reading-progress" id="readingProgress" aria-hidden="true"></div>
+
+  <header class="site-header">
+    <a class="wordmark" href="../" aria-label="Dale Yang home">DY<span>.</span></a>
+    <nav aria-label="Primary">
+      <a href="../sections/git.html">Git 学习与实践</a>
+      <a href="https://github.com/yjd953">GitHub</a>
+    </nav>
+  </header>
+
+  <main class="article-layout">
+    <header class="article-masthead">
+      <a class="back-link" href="../sections/git.html">← Git 学习与实践</a>
+      <p class="kicker">04.11 / Advanced tools / ZH</p>
+      <h1>Stash、Worktree 和 Tag 分别解决什么问题？</h1>
+      <p class="article-deck">管理临时修改、并行工作目录和稳定发布标记，避免把不同任务混在一起。</p>
+    </header>
+
+    <article class="prose">
+      <p>这三个工具看起来彼此无关，但都在解决“当前分支之外的状态管理”：</p>
+<ul>
+<li>Stash：暂时收起未完成修改；</li>
+<li>Worktree：让同一个仓库同时检出多个工作目录；</li>
+<li>Tag：给一个稳定历史节点建立版本标记。</li>
+</ul>
+<p>正确使用它们，可以避免：</p>
+<ul>
+<li>为切分支创建无意义的临时提交；</li>
+<li>在一个目录里反复切换并污染工作区；</li>
+<li>用分支名代替正式发布版本；</li>
+<li>把不同任务混在一起。</li>
+</ul>
+<h2 id="section-stash-到底保存了什么">Stash 到底保存了什么</h2>
+<p>执行：</p>
+<pre><code class="language-bash">git stash push -m &quot;WIP: upload retry&quot;
+</code></pre>
+<p>Git 会保存当前工作区和暂存区状态，并尽量把工作区恢复到基线。</p>
+<p>Stash 不是简单复制到临时文件夹。它由 Git 对象和引用组成，通常可以包含：</p>
+<ul>
+<li>已跟踪文件的工作区变化；</li>
+<li>暂存区变化；</li>
+<li>可选未跟踪文件；</li>
+<li>可选忽略文件。</li>
+</ul>
+<p>查看：</p>
+<pre><code class="language-bash">git stash list
+</code></pre>
+<p>示例：</p>
+<pre><code class="language-text">stash@{0}: On main: WIP: upload retry
+stash@{1}: On feature/login: before rebase
+</code></pre>
+<p>查看概要：</p>
+<pre><code class="language-bash">git stash show stash@{0}
+</code></pre>
+<p>查看 Patch：</p>
+<pre><code class="language-bash">git stash show -p stash@{0}
+</code></pre>
+<h2 id="section-默认-stash-不包含所有文件">默认 Stash 不包含所有文件</h2>
+<p>默认通常保存已跟踪文件变化，不包括未跟踪文件。</p>
+<p>包含未跟踪：</p>
+<pre><code class="language-bash">git stash push -u -m &quot;include untracked files&quot;
+</code></pre>
+<p>包含忽略文件：</p>
+<pre><code class="language-bash">git stash push -a -m &quot;include ignored files&quot;
+</code></pre>
+<p><code>-a</code> 可能把大量构建产物、依赖目录一起保存，体积和恢复冲突都会增大。执行前先：</p>
+<pre><code class="language-bash">git status --short
+</code></pre>
+<p>只保存指定路径：</p>
+<pre><code class="language-bash">git stash push -m &quot;only docs&quot; -- docs/
+</code></pre>
+<p>交互选择：</p>
+<pre><code class="language-bash">git stash push -p
+</code></pre>
+<h2 id="section-applypopdrop"><code>apply</code>、<code>pop</code>、<code>drop</code></h2>
+<p>应用但保留记录：</p>
+<pre><code class="language-bash">git stash apply stash@{0}
+</code></pre>
+<p>应用成功后删除：</p>
+<pre><code class="language-bash">git stash pop stash@{0}
+</code></pre>
+<p>只删除：</p>
+<pre><code class="language-bash">git stash drop stash@{0}
+</code></pre>
+<p>清空全部：</p>
+<pre><code class="language-bash">git stash clear
+</code></pre>
+<p><code>clear</code> 很难恢复，不要把 Stash 当长期备份。</p>
+<p>更稳健的恢复习惯：</p>
+<pre><code class="language-bash">git stash apply stash@{0}
+# 检查并测试
+git stash drop stash@{0}
+</code></pre>
+<p>比直接 Pop 多一步，但应用结果出问题时原 Stash 仍在。</p>
+<h2 id="section-保留暂存状态">保留暂存状态</h2>
+<p>创建 Stash 时保留 Index 中的修改在当前工作区：</p>
+<pre><code class="language-bash">git stash push --keep-index
+</code></pre>
+<p>常见用途：</p>
+<ol>
+<li>已暂存准备提交的功能；</li>
+<li>工作区还有未暂存的其他实验；</li>
+<li>想只测试已暂存版本。</li>
+</ol>
+<p>流程：</p>
+<pre><code class="language-bash">git stash push --keep-index
+&lt;运行测试&gt;
+git commit
+git stash pop
+</code></pre>
+<p>应用时恢复原暂存状态：</p>
+<pre><code class="language-bash">git stash apply --index stash@{0}
+</code></pre>
+<p>否则变化可能只回到工作区。</p>
+<h2 id="section-stash-冲突怎样处理">Stash 冲突怎样处理</h2>
+<p>Stash 保存时基于旧提交，应用到新基线时也需要三方合并，可能冲突。</p>
+<pre><code class="language-bash">git stash apply stash@{0}
+git status
+</code></pre>
+<p>解决方式与 Merge 类似：</p>
+<pre><code class="language-bash"># 编辑冲突
+git add &lt;resolved-file&gt;
+</code></pre>
+<p>如果当前基线变化太大，使用：</p>
+<pre><code class="language-bash">git stash branch recover-stash stash@{0}
+</code></pre>
+<p>Git 会从 Stash 创建时的原基线建立新分支并应用修改，通常能减少冲突。</p>
+<h2 id="section-什么时候不应该用-stash">什么时候不应该用 Stash</h2>
+<p>不适合：</p>
+<ul>
+<li>长期保存重要工作；</li>
+<li>跨机器协作；</li>
+<li>需要 Review；</li>
+<li>需要清楚历史说明；</li>
+<li>数周后才继续。</li>
+</ul>
+<p>这类工作应创建分支并提交：</p>
+<pre><code class="language-bash">git switch -c wip/upload-retry
+git add -A
+git commit -m &quot;wip: preserve upload retry experiment&quot;
+</code></pre>
+<p>WIP Commit 至少有稳定引用，可以 Push 到私有远端；之后再用 Interactive Rebase 整理。</p>
+<h2 id="section-worktree同一对象库的多个工作目录">Worktree：同一对象库的多个工作目录</h2>
+<p>假设正在 <code>feature/x</code> 开发，工作区有大量未完成修改，突然需要检查 <code>main</code> 的线上问题。</p>
+<p>传统方式：</p>
+<ul>
+<li>Stash；</li>
+<li>切分支；</li>
+<li>修复；</li>
+<li>切回来；</li>
+<li>恢复 Stash。</li>
+</ul>
+<p>Worktree 可以创建另一个工作目录：</p>
+<pre><code class="language-bash">git worktree add ../project-hotfix -b hotfix/login origin/main
+</code></pre>
+<p>结果：</p>
+<pre><code class="language-text">project/          → feature/x
+project-hotfix/   → hotfix/login
+</code></pre>
+<p>两者共享大部分 Git 对象数据库，但拥有独立：</p>
+<ul>
+<li>工作区；</li>
+<li>Index；</li>
+<li>HEAD；</li>
+<li>当前分支。</li>
+</ul>
+<p>可以同时打开两个 IDE 窗口，不需要反复切换。</p>
+<h2 id="section-worktree-的常用操作">Worktree 的常用操作</h2>
+<p>查看：</p>
+<pre><code class="language-bash">git worktree list
+</code></pre>
+<p>基于现有分支：</p>
+<pre><code class="language-bash">git worktree add ../project-release release/1.0
+</code></pre>
+<p>Detached 检出旧版本：</p>
+<pre><code class="language-bash">git worktree add --detach ../project-old v1.0.0
+</code></pre>
+<p>删除：</p>
+<pre><code class="language-bash">git worktree remove ../project-hotfix
+</code></pre>
+<p>清理已被手工删除目录的过期记录：</p>
+<pre><code class="language-bash">git worktree prune
+</code></pre>
+<p>移动：</p>
+<pre><code class="language-bash">git worktree move ../old-path ../new-path
+</code></pre>
+<p>不要直接复制包含 <code>.git</code> 的整个仓库来模拟 Worktree，容易造成远端、分支和对象重复管理。</p>
+<h2 id="section-为什么同一分支通常不能同时检出两次">为什么同一分支通常不能同时检出两次</h2>
+<p>Git 默认阻止：</p>
+<pre><code class="language-text">fatal: &#39;main&#39; is already checked out
+</code></pre>
+<p>因为两个工作目录同时修改同一个分支引用，会让“当前分支对应哪个工作区状态”变得危险。</p>
+<p>不同 Worktree 应使用不同分支，或其中一个使用 Detached HEAD。</p>
+<p>Worktree 适合：</p>
+<ul>
+<li>并行功能开发；</li>
+<li>紧急 Hotfix；</li>
+<li>比较多个版本；</li>
+<li>在旧版本运行测试；</li>
+<li>同时维护 Release 分支；</li>
+<li>Agent/自动化任务隔离工作目录。</li>
+</ul>
+<h2 id="section-worktree-的-git-为什么可能是文件">Worktree 的 <code>.git</code> 为什么可能是文件</h2>
+<p>附加 Worktree 根目录中的 <code>.git</code> 可能是文本文件：</p>
+<pre><code class="language-text">gitdir: /path/main-repo/.git/worktrees/project-hotfix
+</code></pre>
+<p>它指向主仓库的 Worktree 管理目录。</p>
+<p>因此：</p>
+<ul>
+<li>不要假设 <code>.git</code> 永远是目录；</li>
+<li>脚本应使用 <code>git rev-parse --git-dir</code>；</li>
+<li>删除主仓库前要处理附加 Worktree；</li>
+<li>备份时要理解共享对象关系。</li>
+</ul>
+<h2 id="section-tag给历史节点建立版本名字">Tag：给历史节点建立版本名字</h2>
+<p>分支会随提交移动：</p>
+<pre><code class="language-text">main: v1 commit → v2 commit → v3 commit
+</code></pre>
+<p>Tag 通常表示稳定版本点：</p>
+<pre><code class="language-text">v1.0.0 ─► Commit A
+v1.1.0 ─► Commit D
+</code></pre>
+<p>轻量标签：</p>
+<pre><code class="language-bash">git tag v1.0.0
+</code></pre>
+<p>本质接近一个直接引用。</p>
+<p>附注标签：</p>
+<pre><code class="language-bash">git tag -a v1.0.0 -m &quot;First stable release&quot;
+</code></pre>
+<p>会创建 Tag 对象，保存：</p>
+<ul>
+<li>Tagger；</li>
+<li>时间；</li>
+<li>Message；</li>
+<li>目标对象；</li>
+<li>可选签名。</li>
+</ul>
+<p>发布版本通常用附注标签。</p>
+<h2 id="section-查看和推送-tag">查看和推送 Tag</h2>
+<p>列出：</p>
+<pre><code class="language-bash">git tag --list
+git tag --list &#39;v1.*&#39;
+</code></pre>
+<p>查看：</p>
+<pre><code class="language-bash">git show v1.0.0
+</code></pre>
+<p>推送一个：</p>
+<pre><code class="language-bash">git push origin v1.0.0
+</code></pre>
+<p>推送所有：</p>
+<pre><code class="language-bash">git push origin --tags
+</code></pre>
+<p>普通 <code>git push</code> 不一定推送所有 Tag。</p>
+<p>从指定提交创建：</p>
+<pre><code class="language-bash">git tag -a v1.0.1 &lt;commit&gt; -m &quot;Patch release&quot;
+</code></pre>
+<h2 id="section-不要随意移动已发布-tag">不要随意移动已发布 Tag</h2>
+<p>如果 <code>v1.0.0</code> 已公开，它可能被：</p>
+<ul>
+<li>CI 构建制品；</li>
+<li>软件包；</li>
+<li>部署记录；</li>
+<li>用户依赖；</li>
+<li>Release 页面；</li>
+<li>安全审计；</li>
+</ul>
+<p>引用。</p>
+<p>删除并重建同名 Tag 会让“v1.0.0 到底是哪份代码”失去稳定性。</p>
+<p>发现发布错误时，通常创建新版本：</p>
+<pre><code class="language-text">v1.0.1
+</code></pre>
+<p>而不是偷偷移动 <code>v1.0.0</code>。</p>
+<p>确需删除：</p>
+<pre><code class="language-bash">git tag -d v1.0.0
+git push origin :refs/tags/v1.0.0
+</code></pre>
+<p>必须与团队和下游用户协调。</p>
+<h2 id="section-签名-tag">签名 Tag</h2>
+<p>使用 GPG 或 SSH 签名配置后：</p>
+<pre><code class="language-bash">git tag -s v1.0.0 -m &quot;Signed release&quot;
+</code></pre>
+<p>验证：</p>
+<pre><code class="language-bash">git tag -v v1.0.0
+</code></pre>
+<p>签名证明：</p>
+<ul>
+<li>持有对应私钥的人签署了该对象；</li>
+<li>对象内容签署后未被修改。</li>
+</ul>
+<p>它不自动证明代码安全，也不等于发布流程可信。仍需要：</p>
+<ul>
+<li>受保护构建环境；</li>
+<li>制品签名；</li>
+<li>依赖审计；</li>
+<li>权限和密钥管理。</li>
+</ul>
+<h2 id="section-三者怎样选择">三者怎样选择</h2>
+<h3 id="section-临时切换任务">临时切换任务</h3>
+<p>修改很小、很快回来：</p>
+<pre><code class="language-text">Stash
+</code></pre>
+<h3 id="section-两个任务要并行多小时或多天">两个任务要并行多小时或多天</h3>
+<pre><code class="language-text">Worktree + 独立分支
+</code></pre>
+<h3 id="section-需要跨机器或与人共享">需要跨机器或与人共享</h3>
+<pre><code class="language-text">Commit + Push 分支
+</code></pre>
+<h3 id="section-标记不可随开发移动的发布节点">标记不可随开发移动的发布节点</h3>
+<pre><code class="language-text">Annotated Tag
+</code></pre>
+<h3 id="section-保存未经整理但重要的工作">保存未经整理但重要的工作</h3>
+<pre><code class="language-text">WIP Branch/Commit 优于长期 Stash
+</code></pre>
+<h2 id="section-一个组合实践">一个组合实践</h2>
+<p>正在开发：</p>
+<pre><code class="language-bash">git switch -c feature/export origin/main
+# 有未完成修改
+</code></pre>
+<p>突然要修复线上：</p>
+<pre><code class="language-bash">git worktree add ../project-hotfix -b hotfix/crash origin/main
+cd ../project-hotfix
+# 修复、测试、提交、推送
+</code></pre>
+<p>发布：</p>
+<pre><code class="language-bash">git tag -a v1.4.1 -m &quot;Fix export crash&quot;
+git push origin hotfix/crash
+git push origin v1.4.1
+</code></pre>
+<p>清理：</p>
+<pre><code class="language-bash">cd ../project
+git worktree remove ../project-hotfix
+git fetch --prune origin
+</code></pre>
+<p>原功能目录从未被切换，未完成修改也不需要 Stash。</p>
+<p>这三个工具的共同原则是：给不同生命周期的状态使用不同容器，而不是把所有东西都堆在当前工作区和当前分支里。</p>
+
+    </article>
+  </main>
+
+  <footer class="site-footer article-footer">
+    <a href="../sections/git.html">Git 学习与实践 / 进阶工具</a>
+    <a href="https://github.com/yjd953/yjd953/blob/main/posts/git-stash-worktree-tags.md">View source ↗</a>
+  </footer>
+  <script src="../assets/site.js" defer></script>
+</body>
+</html>

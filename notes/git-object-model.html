@@ -1,0 +1,375 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="拆解 Blob、Tree、Commit、Tag 与对象 ID，理解 Git 为什么更像快照数据库。">
+  <meta name="theme-color" content="#f1f1ee">
+  <title>Git 的对象数据库里到底存了什么？ — Dale Yang</title>
+  <link rel="stylesheet" href="../assets/site.css">
+</head>
+<body class="article-page">
+  <div class="reading-progress" id="readingProgress" aria-hidden="true"></div>
+
+  <header class="site-header">
+    <a class="wordmark" href="../" aria-label="Dale Yang home">DY<span>.</span></a>
+    <nav aria-label="Primary">
+      <a href="../sections/git.html">Git 学习与实践</a>
+      <a href="https://github.com/yjd953">GitHub</a>
+    </nav>
+  </header>
+
+  <main class="article-layout">
+    <header class="article-masthead">
+      <a class="back-link" href="../sections/git.html">← Git 学习与实践</a>
+      <p class="kicker">04.02 / Object model / ZH</p>
+      <h1>Git 的对象数据库里到底存了什么？</h1>
+      <p class="article-deck">拆解 Blob、Tree、Commit、Tag 与对象 ID，理解 Git 为什么更像快照数据库。</p>
+    </header>
+
+    <article class="prose">
+      <p>从用户视角看，Git 管理的是文件和提交；从内部实现看，Git 管理的是一组按内容寻址的对象。</p>
+<p>最核心的四种对象是：</p>
+<pre><code class="language-text">Blob   文件内容
+Tree   目录结构
+Commit 一次历史节点
+Tag    带说明的稳定引用对象
+</code></pre>
+<p>它们通常保存在：</p>
+<pre><code class="language-text">.git/objects/
+</code></pre>
+<p>理解这些对象以后，很多现象都会变得自然：</p>
+<ul>
+<li>Git 为什么能快速判断相同内容；</li>
+<li>文件重命名为什么不是一种永久记录；</li>
+<li>提交为什么修改一点内容就会得到全新哈希；</li>
+<li>分支删除后提交为什么有时还能恢复；</li>
+<li>清理敏感历史为什么不等于删除当前文件。</li>
+</ul>
+<h2 id="section-内容寻址对象-id-由内容决定">内容寻址：对象 ID 由内容决定</h2>
+<p>Git 对对象进行序列化和哈希，得到对象 ID。概念上：</p>
+<pre><code class="language-text">对象 ID = hash(对象类型 + 内容长度 + 对象内容)
+</code></pre>
+<p>传统仓库常见 SHA-1：</p>
+<pre><code class="language-text">e965047ad7c57865823c7d992b1d046ea66edf78
+</code></pre>
+<p>较新的 Git 也支持 SHA-256 仓库。无论使用哪种算法，关键性质相同：</p>
+<blockquote>
+<p>对象的名字不是用户随便取的，而是由对象内容计算得到。</p>
+</blockquote>
+<p>因此相同内容会得到相同对象 ID；内容改变一个字节，就会得到不同 ID。</p>
+<p>可以直接创建一个 Blob：</p>
+<pre><code class="language-bash">printf &quot;hello\n&quot; | git hash-object --stdin
+</code></pre>
+<p>只计算但不写入对象库。加上 <code>-w</code>：</p>
+<pre><code class="language-bash">printf &quot;hello\n&quot; | git hash-object -w --stdin
+</code></pre>
+<p>对象会写入 <code>.git/objects</code>。</p>
+<p>查看对象类型与内容：</p>
+<pre><code class="language-bash">git cat-file -t &lt;object-id&gt;
+git cat-file -p &lt;object-id&gt;
+</code></pre>
+<h2 id="section-blob只保存文件内容不保存文件名">Blob：只保存文件内容，不保存文件名</h2>
+<p>Blob 是 Binary Large Object 的缩写。它保存一段字节，不关心这段字节叫什么名字。</p>
+<p>假设两个文件内容完全相同：</p>
+<pre><code class="language-text">docs/a.txt  → &quot;hello\n&quot;
+docs/b.txt  → &quot;hello\n&quot;
+</code></pre>
+<p>它们可以共同引用同一个 Blob：</p>
+<pre><code class="language-text">Blob e965047...
+     ▲       ▲
+     │       │
+   a.txt   b.txt
+</code></pre>
+<p>文件名和路径由 Tree 保存，而不是 Blob。</p>
+<p>Blob 也通常不保存：</p>
+<ul>
+<li>作者；</li>
+<li>修改时间；</li>
+<li>文件路径；</li>
+<li>“这是一行新增还是一行删除”；</li>
+<li>完整 Unix 权限。</li>
+</ul>
+<p>Git 主要关心少量模式信息，例如普通文件、可执行文件、符号链接和子模块。</p>
+<p>这解释了一个重要事实：</p>
+<blockquote>
+<p>Git 不是逐行记录编辑动作的录像机。</p>
+</blockquote>
+<p>它保存每个版本的文件内容。需要查看变化时，再比较两个 Blob 并生成 Diff。</p>
+<h2 id="section-tree把名字模式与对象组织成目录">Tree：把名字、模式与对象组织成目录</h2>
+<p>Tree 类似目录快照。一个 Tree 条目包含：</p>
+<pre><code class="language-text">文件模式  对象类型  对象 ID  名称
+</code></pre>
+<p>查看当前提交的根 Tree：</p>
+<pre><code class="language-bash">git cat-file -p HEAD^{tree}
+</code></pre>
+<p>可能得到：</p>
+<pre><code class="language-text">100644 blob a1b2c3...  README.md
+040000 tree d4e5f6...  src
+100755 blob 112233...  scripts/build.sh
+</code></pre>
+<p>其中：</p>
+<ul>
+<li><code>100644</code> 表示普通非执行文件；</li>
+<li><code>100755</code> 表示可执行文件；</li>
+<li><code>040000</code> 表示子 Tree，也就是目录；</li>
+<li>名称把对象放到了具体路径。</li>
+</ul>
+<p>例如：</p>
+<pre><code class="language-text">根 Tree
+├── README.md ──► Blob A
+└── src ────────► Tree B
+                   ├── app.js ──► Blob C
+                   └── api.js ──► Blob D
+</code></pre>
+<p>这整棵树共同描述一次项目快照。</p>
+<p>如果只修改 <code>src/app.js</code>：</p>
+<ol>
+<li>产生新的 Blob C2；</li>
+<li><code>src</code> 目录产生新的 Tree B2；</li>
+<li>根目录产生新的 Tree Root2；</li>
+<li>新提交引用 Root2。</li>
+</ol>
+<p>没有变化的 <code>README.md</code> 和 <code>api.js</code> 继续复用原对象。</p>
+<p>这就是 Git 能采用快照模型而不必每次完整复制仓库的原因：不变对象天然复用。</p>
+<h2 id="section-commit把快照接入历史图">Commit：把快照接入历史图</h2>
+<p>Commit 对象不直接包含所有文件内容。它引用根 Tree，并带有历史和身份信息。</p>
+<p>执行：</p>
+<pre><code class="language-bash">git cat-file -p HEAD
+</code></pre>
+<p>可以看到类似：</p>
+<pre><code class="language-text">tree 70f3a9...
+parent 4c21b8...
+author DaleYang &lt;128274172+yjd953@users.noreply.github.com&gt; 1791673200 +0800
+committer DaleYang &lt;128274172+yjd953@users.noreply.github.com&gt; 1791673200 +0800
+
+docs: explain Git objects
+</code></pre>
+<p>字段含义：</p>
+<div class="table-scroll"><table>
+<thead>
+<tr>
+<th>字段</th>
+<th>作用</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>tree</code></td>
+<td>该提交对应的项目根快照</td>
+</tr>
+<tr>
+<td><code>parent</code></td>
+<td>直接父提交</td>
+</tr>
+<tr>
+<td><code>author</code></td>
+<td>原始变更作者</td>
+</tr>
+<tr>
+<td><code>committer</code></td>
+<td>创建当前 Commit 对象的人</td>
+</tr>
+<tr>
+<td>message</td>
+<td>提交说明</td>
+</tr>
+</tbody></table></div>
+<p>普通提交有一个父节点：</p>
+<pre><code class="language-text">C1 ← C2 ← C3
+</code></pre>
+<p>合并提交可能有两个或更多父节点：</p>
+<pre><code class="language-text">C1 ← C2 ← M
+       ↖ C3 ↗
+</code></pre>
+<p>根提交没有父节点。</p>
+<p>由于 Commit 内容包含：</p>
+<ul>
+<li>Tree ID；</li>
+<li>Parent ID；</li>
+<li>作者和提交者；</li>
+<li>时间戳；</li>
+<li>提交说明；</li>
+</ul>
+<p>其中任意字段变化，Commit ID 都会变化。</p>
+<p>所以即使文件快照完全相同，只要提交说明或父提交不同，也会创建不同的 Commit。</p>
+<h2 id="section-tag给某个对象建立带说明可签名的标记">Tag：给某个对象建立带说明、可签名的标记</h2>
+<p>轻量标签只是一个引用：</p>
+<pre><code class="language-bash">git tag v1.0.0
+</code></pre>
+<p>它通常直接指向某个 Commit。</p>
+<p>附注标签会创建 Tag 对象：</p>
+<pre><code class="language-bash">git tag -a v1.0.0 -m &quot;First stable release&quot;
+</code></pre>
+<p>Tag 对象包含：</p>
+<ul>
+<li>目标对象；</li>
+<li>目标类型；</li>
+<li>Tag 名；</li>
+<li>创建者；</li>
+<li>时间；</li>
+<li>说明；</li>
+<li>可选签名。</li>
+</ul>
+<p>查看：</p>
+<pre><code class="language-bash">git cat-file -p v1.0.0
+</code></pre>
+<p>发布版本通常更适合使用附注标签，因为它具有独立说明和签名能力。</p>
+<h2 id="section-文件重命名为什么不是独立对象">文件重命名为什么不是独立对象</h2>
+<p>假设提交 A 中：</p>
+<pre><code class="language-text">old.txt → Blob X
+</code></pre>
+<p>提交 B 中：</p>
+<pre><code class="language-text">new.txt → Blob X
+</code></pre>
+<p>Git 的快照只表示：</p>
+<ul>
+<li>旧 Tree 有 <code>old.txt</code>；</li>
+<li>新 Tree 有 <code>new.txt</code>；</li>
+<li>两者引用同一个 Blob。</li>
+</ul>
+<p>对象里没有一条永久的“rename old.txt to new.txt”指令。显示历史时，Git 根据内容相似度推断重命名：</p>
+<pre><code class="language-bash">git diff -M A B
+git log --follow -- new.txt
+</code></pre>
+<p>如果文件同时改名并大幅重写，Git 的相似度判断可能无法把两个版本连接起来。这不是历史损坏，而是“重命名”本来就是比较阶段的推断。</p>
+<h2 id="section-diff-是计算结果不是核心存储格式">Diff 是计算结果，不是核心存储格式</h2>
+<p>给定两个提交：</p>
+<pre><code class="language-text">Commit A → Tree A → Blob old
+Commit B → Tree B → Blob new
+</code></pre>
+<p>Git 比较两棵 Tree，找到路径变化，再比较对应 Blob：</p>
+<pre><code class="language-bash">git diff A B
+</code></pre>
+<p>输出：</p>
+<pre><code class="language-diff">- old line
++ new line
+</code></pre>
+<p>这只是对两份内容的解释。可以改变比较方式：</p>
+<pre><code class="language-bash">git diff --word-diff A B
+git diff --stat A B
+git diff --name-status A B
+git diff --ignore-space-change A B
+</code></pre>
+<p>底层对象没有改变，展示结果却可以不同。</p>
+<p>因此不要把“Git 保存 Diff”当成核心模型。Git 能高效压缩对象，但逻辑模型仍然是快照。</p>
+<h2 id="section-loose-object-与-packfile">Loose Object 与 Packfile</h2>
+<p>刚创建的小对象可能以 Loose Object 保存：</p>
+<pre><code class="language-text">.git/objects/e9/65047ad7c578...
+</code></pre>
+<p>目录名取对象 ID 前两位，文件名使用剩余部分。内容经过压缩，并不是可以直接阅读的纯文本。</p>
+<p>随着对象增多，Git 会把它们打包到：</p>
+<pre><code class="language-text">.git/objects/pack/
+├── pack-xxxx.pack
+└── pack-xxxx.idx
+</code></pre>
+<p>Packfile 会：</p>
+<ul>
+<li>集中存储多个对象；</li>
+<li>对相似对象使用 Delta Compression；</li>
+<li>用索引快速定位对象。</li>
+</ul>
+<p>这属于物理存储优化，不改变逻辑对象模型。一个 Commit 仍然引用 Tree，Tree 仍然引用 Blob，只是对象字节可能被打包和增量压缩。</p>
+<p>常见维护命令：</p>
+<pre><code class="language-bash">git count-objects -v
+git gc
+git verify-pack -v .git/objects/pack/*.idx
+</code></pre>
+<p>日常通常不需要手动运行 <code>git gc</code>，Git 会在适当时机自动维护。</p>
+<h2 id="section-可达性决定对象是否属于当前历史">可达性决定对象是否属于当前历史</h2>
+<p>分支、标签、HEAD 和其他引用是图的入口：</p>
+<pre><code class="language-text">main ──► C5 ──► C4 ──► C3
+tag v1 ───────────────► C3
+</code></pre>
+<p>从这些引用沿 Parent、Tree、Blob 关系可以走到的对象，称为可达对象。</p>
+<p>如果删除唯一指向 C5 的分支：</p>
+<pre><code class="language-text">main 被删除
+
+C5 ──► C4 ──► C3
+</code></pre>
+<p>C5 和 C4 可能暂时变成不可达对象。它们不会一定立刻从磁盘消失：</p>
+<ul>
+<li>Reflog 可能仍记录旧引用；</li>
+<li>垃圾回收通常有宽限期；</li>
+<li>其他隐藏引用可能仍然指向它。</li>
+</ul>
+<p>因此误删分支后经常还能恢复：</p>
+<pre><code class="language-bash">git reflog
+git branch recovered &lt;old-commit&gt;
+</code></pre>
+<p>反过来，清理敏感信息时，仅删除分支或强推并不一定立刻删除所有对象副本，还需要检查其他引用、Reflog、缓存和外部 clone。</p>
+<h2 id="section-对象不可变历史修改靠创建新对象">对象不可变，历史修改靠创建新对象</h2>
+<p>Git 对象按内容寻址。修改一个 Commit 的邮箱并不是在原对象上改字段，而是：</p>
+<ol>
+<li>创建一个邮箱不同的新 Commit；</li>
+<li>因 Parent ID 变化，所有后代 Commit 也要重新创建；</li>
+<li>把分支引用移动到新历史；</li>
+<li>旧历史变成不可达或仍由其他引用保留。</li>
+</ol>
+<p>例如：</p>
+<pre><code class="language-text">旧：A ← B ← C
+        邮箱错误
+
+新：A ← B&#39; ← C&#39;
+        邮箱修正
+</code></pre>
+<p><code>B&#39;</code> 的 ID 与 <code>B</code> 不同，<code>C&#39;</code> 的 Parent 从 <code>B</code> 变成 <code>B&#39;</code>，所以 <code>C&#39;</code> 也不同。</p>
+<p>这就是 Rebase、Amend、Filter-repo 和历史重建都会改变 Commit ID 的根本原因。</p>
+<h2 id="section-用-plumbing-命令观察一个真实提交">用 Plumbing 命令观察一个真实提交</h2>
+<p>在任意测试仓库中：</p>
+<pre><code class="language-bash">git rev-parse HEAD
+git cat-file -t HEAD
+git cat-file -p HEAD
+</code></pre>
+<p>取出根 Tree：</p>
+<pre><code class="language-bash">git rev-parse HEAD^{tree}
+git cat-file -p HEAD^{tree}
+</code></pre>
+<p>找到其中一个 Blob，再查看：</p>
+<pre><code class="language-bash">git cat-file -t &lt;blob-id&gt;
+git cat-file -s &lt;blob-id&gt;
+git cat-file -p &lt;blob-id&gt;
+</code></pre>
+<p>最后列出整个提交快照：</p>
+<pre><code class="language-bash">git ls-tree -r HEAD
+</code></pre>
+<p>这组命令不会修改仓库。它们把平时由 <code>status</code>、<code>log</code> 和 IDE 隐藏的对象关系直接展示出来。</p>
+<h2 id="section-最小对象实验">最小对象实验</h2>
+<p>创建临时仓库：</p>
+<pre><code class="language-bash">mkdir git-object-lab
+cd git-object-lab
+git init
+
+printf &quot;same content\n&quot; &gt; a.txt
+cp a.txt b.txt
+git add a.txt b.txt
+git commit -m &quot;add equal files&quot;
+</code></pre>
+<p>观察：</p>
+<pre><code class="language-bash">git ls-tree HEAD
+</code></pre>
+<p>你会发现 <code>a.txt</code> 和 <code>b.txt</code> 很可能指向同一个 Blob ID。</p>
+<p>然后修改一个文件：</p>
+<pre><code class="language-bash">printf &quot;changed\n&quot; &gt; b.txt
+git add b.txt
+git commit -m &quot;change b&quot;
+git ls-tree HEAD
+</code></pre>
+<p>此时：</p>
+<ul>
+<li><code>a.txt</code> 继续指向旧 Blob；</li>
+<li><code>b.txt</code> 指向新 Blob；</li>
+<li>根 Tree 变化；</li>
+<li>Commit 变化。</li>
+</ul>
+<p>这就是 Git 的核心：文件内容、目录快照与历史节点彼此分离，通过对象 ID 连成一张不可变图。</p>
+
+    </article>
+  </main>
+
+  <footer class="site-footer article-footer">
+    <a href="../sections/git.html">Git 学习与实践 / 基础模型</a>
+    <a href="https://github.com/yjd953/yjd953/blob/main/posts/git-object-model.md">View source ↗</a>
+  </footer>
+  <script src="../assets/site.js" defer></script>
+</body>
+</html>

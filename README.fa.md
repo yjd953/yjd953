@@ -29,6 +29,9 @@
 **03 / [مبانی بک‌اند](https://yjd953.github.io/yjd953/sections/backend.html)**<br>
 Java، Go، JVM، Redis، MySQL، MQ، شبکه و سیستم‌های توزیع‌شده.
 
+**04 / [یادگیری و تمرین Git](https://yjd953.github.io/yjd953/sections/git.html)**<br>
+آبجکت‌ها، Commitها، Branchها، همکاری، بررسی تاریخچه، بازیابی، نگهداری مخزن، هویت و حریم خصوصی.
+
 ## فعالیت
 
 <picture>

@@ -1,0 +1,345 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="区分 Author 与 Committer，理解邮箱暴露、仓库级身份、Noreply 邮箱和签名验证。">
+  <meta name="theme-color" content="#f1f1ee">
+  <title>Git 提交身份、邮箱与签名是怎样工作的？ — Dale Yang</title>
+  <link rel="stylesheet" href="../assets/site.css">
+</head>
+<body class="article-page">
+  <div class="reading-progress" id="readingProgress" aria-hidden="true"></div>
+
+  <header class="site-header">
+    <a class="wordmark" href="../" aria-label="Dale Yang home">DY<span>.</span></a>
+    <nav aria-label="Primary">
+      <a href="../sections/git.html">Git 学习与实践</a>
+      <a href="https://github.com/yjd953">GitHub</a>
+    </nav>
+  </header>
+
+  <main class="article-layout">
+    <header class="article-masthead">
+      <a class="back-link" href="../sections/git.html">← Git 学习与实践</a>
+      <p class="kicker">04.14 / Identity and privacy / ZH</p>
+      <h1>Git 提交身份、邮箱与签名是怎样工作的？</h1>
+      <p class="article-deck">区分 Author 与 Committer，理解邮箱暴露、仓库级身份、Noreply 邮箱和签名验证。</p>
+    </header>
+
+    <article class="prose">
+      <p>Git 提交天然包含身份元数据。公开仓库中的 Commit 不仅能展示代码变化，还可能展示：</p>
+<ul>
+<li>姓名或昵称；</li>
+<li>邮箱；</li>
+<li>Author 时间与时区；</li>
+<li>Committer；</li>
+<li>GPG/SSH 签名状态；</li>
+<li>与托管平台账号的关联。</li>
+</ul>
+<p>这不是 GitHub 页面额外猜出来的，而是 Commit 对象本身的一部分。</p>
+<h2 id="section-author-与-committer">Author 与 Committer</h2>
+<p>查看：</p>
+<pre><code class="language-bash">git show --no-patch --format=fuller HEAD
+</code></pre>
+<p>示例：</p>
+<pre><code class="language-text">Author:     DaleYang &lt;128274172+yjd953@users.noreply.github.com&gt;
+AuthorDate: ...
+Commit:     DaleYang &lt;128274172+yjd953@users.noreply.github.com&gt;
+CommitDate: ...
+</code></pre>
+<p>Author 表示：</p>
+<blockquote>
+<p>原始变更由谁创作。</p>
+</blockquote>
+<p>Committer 表示：</p>
+<blockquote>
+<p>当前 Commit 对象由谁创建或最终应用。</p>
+</blockquote>
+<p>普通本地提交两者通常相同。</p>
+<p>以下场景可能不同：</p>
+<ul>
+<li>应用别人通过邮件发送的 Patch；</li>
+<li>Cherry-pick；</li>
+<li>Rebase；</li>
+<li>网页平台创建合并提交；</li>
+<li>自动化 Bot 提交；</li>
+<li>维护者代为提交贡献。</li>
+</ul>
+<p>隐私审计必须同时检查两组邮箱。</p>
+<h2 id="section-身份值从哪里来">身份值从哪里来</h2>
+<p>Git 读取配置层级：</p>
+<pre><code class="language-text">系统级 system
+全局级 global
+仓库级 local
+Worktree 级 worktree
+命令/环境变量临时覆盖
+</code></pre>
+<p>查看来源：</p>
+<pre><code class="language-bash">git config --show-origin --get-regexp &#39;^user\.&#39;
+</code></pre>
+<p>查看最终值：</p>
+<pre><code class="language-bash">git config user.name
+git config user.email
+</code></pre>
+<p>全局配置常位于：</p>
+<pre><code class="language-text">~/.gitconfig
+</code></pre>
+<p>仓库级配置位于：</p>
+<pre><code class="language-text">.git/config
+</code></pre>
+<p>仓库级值通常覆盖全局值：</p>
+<pre><code class="language-bash">git config --local user.name &quot;DaleYang&quot;
+git config --local user.email &quot;128274172+yjd953@users.noreply.github.com&quot;
+</code></pre>
+<p>这允许：</p>
+<ul>
+<li>公司仓库使用公司身份；</li>
+<li>公开个人仓库使用 Noreply；</li>
+<li>不必修改全局身份影响所有项目。</li>
+</ul>
+<p>在共享机器上仍应注意文件权限和凭证隔离。</p>
+<h2 id="section-临时指定身份而不改配置">临时指定身份而不改配置</h2>
+<p>只影响一次提交：</p>
+<pre><code class="language-bash">git \
+  -c user.name=&quot;DaleYang&quot; \
+  -c user.email=&quot;128274172+yjd953@users.noreply.github.com&quot; \
+  commit -m &quot;docs: update notes&quot;
+</code></pre>
+<p>或者环境变量：</p>
+<pre><code class="language-bash">GIT_AUTHOR_NAME=&quot;DaleYang&quot; \
+GIT_AUTHOR_EMAIL=&quot;128274172+yjd953@users.noreply.github.com&quot; \
+GIT_COMMITTER_NAME=&quot;DaleYang&quot; \
+GIT_COMMITTER_EMAIL=&quot;128274172+yjd953@users.noreply.github.com&quot; \
+git commit -m &quot;Initial public snapshot&quot;
+</code></pre>
+<p>环境变量可以分别覆盖 Author 和 Committer，适合受控脚本和一次性历史重建。</p>
+<p>不要把真实邮箱或 Token 写入会提交的脚本。</p>
+<h2 id="section-github-noreply-邮箱">GitHub Noreply 邮箱</h2>
+<p>GitHub 提供类似：</p>
+<pre><code class="language-text">128274172+yjd953@users.noreply.github.com
+</code></pre>
+<p>或旧式：</p>
+<pre><code class="language-text">yjd953@users.noreply.github.com
+</code></pre>
+<p>它不是匿名身份，只是避免公开真实联系邮箱。用户名和账号 ID 仍然公开。</p>
+<p>平台可通过 Noreply 邮箱把 Commit 关联到账号。</p>
+<p>需要在 GitHub 邮箱设置中：</p>
+<ul>
+<li>启用 Keep my email addresses private；</li>
+<li>可选启用 Block command line pushes that expose my email。</li>
+</ul>
+<p>第二项能阻止部分包含受保护邮箱的新 Push，但不是万能扫描器：</p>
+<ul>
+<li>已有历史仍存在；</li>
+<li>其他邮箱可能未登记；</li>
+<li>文件正文中的邮箱不一定受此规则保护；</li>
+<li>其他托管平台规则不同。</li>
+</ul>
+<h2 id="section-邮箱为什么出现在公开-commit-中">邮箱为什么出现在公开 Commit 中</h2>
+<p>Commit 对象内容包含：</p>
+<pre><code class="language-text">author Name &lt;email&gt; timestamp timezone
+committer Name &lt;email&gt; timestamp timezone
+</code></pre>
+<p>查看原始对象：</p>
+<pre><code class="language-bash">git cat-file -p HEAD
+</code></pre>
+<p>只要公开引用能到达这个 Commit，任何能 Clone 仓库的人都可以读取邮箱：</p>
+<pre><code class="language-bash">git log --all --format=&#39;%H %an &lt;%ae&gt; %cn &lt;%ce&gt;&#39;
+</code></pre>
+<p>隐藏 GitHub Profile 的公开邮箱字段，不会修改已有 Commit。</p>
+<p>删除 README 中的邮箱，也不会修改 Commit 元数据。</p>
+<h2 id="section-托管平台如何关联账号">托管平台如何关联账号</h2>
+<p>平台通常根据经过验证的邮箱识别贡献者。若 Commit 邮箱属于某账号：</p>
+<ul>
+<li>页面可能显示头像和账号链接；</li>
+<li>Contribution Graph 可能计入；</li>
+<li>Verified 状态仍取决于签名；</li>
+<li>Author 和 Pusher 可能不同。</li>
+</ul>
+<p>关联是平台层功能，不改变 Commit 对象。</p>
+<p>如果从账号删除某个邮箱，历史 Commit 仍包含原邮箱文本，只是平台关联展示可能变化。</p>
+<h2 id="section-时区也是身份线索">时区也是身份线索</h2>
+<p>Commit 保存时间戳和时区，例如：</p>
+<pre><code class="language-text">1791673200 +0800
+</code></pre>
+<p>公开历史可能反映：</p>
+<ul>
+<li>常用工作时区；</li>
+<li>活跃时间段；</li>
+<li>工作节奏。</li>
+</ul>
+<p>这通常不是高风险秘密，但属于公开画像的一部分。仅修改展示日期不能消除对象里的原始时间。</p>
+<p>不要为了隐藏时区随意伪造企业审计历史。公开个人项目如果有严格匿名需求，应从项目开始前设计身份隔离，而不是事后零散修补。</p>
+<h2 id="section-提交签名证明什么">提交签名证明什么</h2>
+<p>Git 可以用 GPG、SSH 或 X.509 对提交/标签签名，具体取决于版本和配置。</p>
+<p>签名覆盖 Commit 对象内容，因此可以证明：</p>
+<ol>
+<li>签名私钥持有者签署了这个对象；</li>
+<li>对象签署后没有被修改。</li>
+</ol>
+<p>签名不证明：</p>
+<ul>
+<li>代码没有漏洞；</li>
+<li>Author 字段一定是真实人；</li>
+<li>签名机器没有被入侵；</li>
+<li>Review 已发生；</li>
+<li>构建制品来自该提交。</li>
+</ul>
+<p>它是供应链证据的一环。</p>
+<h2 id="section-使用-ssh-key-签名的基本概念">使用 SSH Key 签名的基本概念</h2>
+<p>现代 Git 可使用 SSH Key：</p>
+<pre><code class="language-bash">git config --local gpg.format ssh
+git config --local user.signingkey ~/.ssh/id_ed25519.pub
+git config --local commit.gpgsign true
+</code></pre>
+<p>具体配置应根据平台文档和公司规范完成。私钥路径、Agent、硬件密钥策略可能不同。</p>
+<p>创建：</p>
+<pre><code class="language-bash">git commit -S -m &quot;feat: signed change&quot;
+</code></pre>
+<p>验证：</p>
+<pre><code class="language-bash">git show --show-signature HEAD
+git verify-commit HEAD
+</code></pre>
+<p>验证者需要可信公钥映射。仅有签名但没有可信身份绑定，价值有限。</p>
+<h2 id="section-gpg-签名">GPG 签名</h2>
+<p>典型配置：</p>
+<pre><code class="language-bash">git config --local user.signingkey &lt;key-id&gt;
+git config --local commit.gpgsign true
+</code></pre>
+<p>验证：</p>
+<pre><code class="language-bash">git verify-commit &lt;commit&gt;
+git verify-tag &lt;tag&gt;
+</code></pre>
+<p>密钥管理要求：</p>
+<ul>
+<li>私钥不进仓库；</li>
+<li>设置合理保护；</li>
+<li>备份和撤销证书；</li>
+<li>离职或设备丢失后撤销；</li>
+<li>定期轮换按组织策略执行。</li>
+</ul>
+<h2 id="section-signed-off-by-不是密码学签名">Signed-off-by 不是密码学签名</h2>
+<p>执行：</p>
+<pre><code class="language-bash">git commit -s
+</code></pre>
+<p>会在 Message 增加：</p>
+<pre><code class="language-text">Signed-off-by: Name &lt;email&gt;
+</code></pre>
+<p>它通常用于 Developer Certificate of Origin，表示提交者对贡献许可做声明。</p>
+<p>它不是 GPG/SSH 数字签名，任何人都能写这行文本。两者不要混淆：</p>
+<pre><code class="language-text">Signed-off-by  法律/流程声明
+Verified       密码学签名验证结果
+</code></pre>
+<h2 id="section-检查公开历史中的身份">检查公开历史中的身份</h2>
+<p>列出唯一身份：</p>
+<pre><code class="language-bash">git log --all --format=&#39;%an &lt;%ae&gt;%n%cn &lt;%ce&gt;&#39; | sort -u
+</code></pre>
+<p>完整 Commit：</p>
+<pre><code class="language-bash">git log --all \
+  --format=&#39;%H%x09%an%x09%ae%x09%cn%x09%ce%x09%s&#39;
+</code></pre>
+<p>搜索公司域名：</p>
+<pre><code class="language-bash">git log --all \
+  --format=&#39;%H %an &lt;%ae&gt; %cn &lt;%ce&gt; %s&#39; |
+grep -i &#39;@company.example&#39;
+</code></pre>
+<p>还要检查文件内容：</p>
+<pre><code class="language-bash">grep -RInE \
+  &#39;[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}&#39; \
+  . \
+  --exclude-dir=.git
+</code></pre>
+<p>二者是不同泄露面：</p>
+<ul>
+<li>Commit 元数据；</li>
+<li>文件正文与历史 Blob。</li>
+</ul>
+<h2 id="section-防止不同项目用错身份">防止不同项目用错身份</h2>
+<p>最简单方案：公开仓库设置 Local Identity：</p>
+<pre><code class="language-bash">git config --local user.name &quot;DaleYang&quot;
+git config --local user.email &quot;128274172+yjd953@users.noreply.github.com&quot;
+</code></pre>
+<p>公司仓库保留公司配置。</p>
+<p>提交前检查：</p>
+<pre><code class="language-bash">git config --show-origin user.name
+git config --show-origin user.email
+</code></pre>
+<p>提交后检查：</p>
+<pre><code class="language-bash">git show --no-patch --format=fuller HEAD
+</code></pre>
+<p>更大规模可使用条件配置：</p>
+<pre><code class="language-ini">[includeIf &quot;gitdir:~/work/company/&quot;]
+    path = ~/.gitconfig-company
+
+[includeIf &quot;gitdir:~/work/public/&quot;]
+    path = ~/.gitconfig-public
+</code></pre>
+<p>这会影响本机配置体系，使用前应理解目录匹配规则并在自己的环境中验证。</p>
+<h2 id="section-已经提交错误邮箱怎么办">已经提交错误邮箱怎么办</h2>
+<p>未 Push 的最后一次提交：</p>
+<pre><code class="language-bash">git commit --amend --reset-author
+</code></pre>
+<p>前提是当前配置已正确。</p>
+<p>一段未共享历史：</p>
+<pre><code class="language-bash">git rebase -i &lt;base&gt;
+</code></pre>
+<p>在目标提交标记 <code>edit</code>，再：</p>
+<pre><code class="language-bash">git commit --amend --reset-author --no-edit
+git rebase --continue
+</code></pre>
+<p>大量历史：</p>
+<ul>
+<li>使用 <code>git filter-repo</code>；</li>
+<li>或从当前快照创建全新根提交；</li>
+<li>更新所有公开引用；</li>
+<li>协调协作者重新同步。</li>
+</ul>
+<p>已公开的邮箱不能保证从互联网绝对收回。外部 Clone、Fork、缓存和索引可能保留副本。</p>
+<h2 id="section-隐私与可追责的平衡">隐私与可追责的平衡</h2>
+<p>公开开源项目可以使用：</p>
+<ul>
+<li>稳定昵称；</li>
+<li>Noreply 邮箱；</li>
+<li>平台账号关联；</li>
+<li>签名提交；</li>
+<li>Issue 作为联系入口。</li>
+</ul>
+<p>企业内部仓库可能要求：</p>
+<ul>
+<li>公司实名邮箱；</li>
+<li>SSO 关联；</li>
+<li>签名；</li>
+<li>审计保留；</li>
+<li>禁止匿名提交。</li>
+</ul>
+<p>两种场景目标不同。最稳妥的方式不是频繁修改全局身份，而是：</p>
+<blockquote>
+<p>按仓库或目录明确配置身份，让公开隐私与内部审计各自满足要求。</p>
+</blockquote>
+<h2 id="section-提交前的身份检查清单">提交前的身份检查清单</h2>
+<pre><code class="language-bash">git rev-parse --show-toplevel
+git config --show-origin user.name
+git config --show-origin user.email
+git status --short --branch
+</code></pre>
+<p>提交后：</p>
+<pre><code class="language-bash">git show --no-patch --format=fuller HEAD
+git log -1 --show-signature
+</code></pre>
+<p>推送前：</p>
+<pre><code class="language-bash">git log origin/main..HEAD \
+  --format=&#39;%H | %an &lt;%ae&gt; | %cn &lt;%ce&gt; | %s&#39;
+</code></pre>
+<p>这几步能在错误身份进入公开远端之前发现问题。</p>
+
+    </article>
+  </main>
+
+  <footer class="site-footer article-footer">
+    <a href="../sections/git.html">Git 学习与实践 / 工程治理</a>
+    <a href="https://github.com/yjd953/yjd953/blob/main/posts/git-identity-privacy.md">View source ↗</a>
+  </footer>
+  <script src="../assets/site.js" defer></script>
+</body>
+</html>

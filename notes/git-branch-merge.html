@@ -1,0 +1,355 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="从共同祖先解释 Fast-forward、Merge Commit、三方合并与冲突解决。">
+  <meta name="theme-color" content="#f1f1ee">
+  <title>分支、合并与冲突到底发生了什么？ — Dale Yang</title>
+  <link rel="stylesheet" href="../assets/site.css">
+</head>
+<body class="article-page">
+  <div class="reading-progress" id="readingProgress" aria-hidden="true"></div>
+
+  <header class="site-header">
+    <a class="wordmark" href="../" aria-label="Dale Yang home">DY<span>.</span></a>
+    <nav aria-label="Primary">
+      <a href="../sections/git.html">Git 学习与实践</a>
+      <a href="https://github.com/yjd953">GitHub</a>
+    </nav>
+  </header>
+
+  <main class="article-layout">
+    <header class="article-masthead">
+      <a class="back-link" href="../sections/git.html">← Git 学习与实践</a>
+      <p class="kicker">04.07 / Branch and merge / ZH</p>
+      <h1>分支、合并与冲突到底发生了什么？</h1>
+      <p class="article-deck">从共同祖先解释 Fast-forward、Merge Commit、三方合并与冲突解决。</p>
+    </header>
+
+    <article class="prose">
+      <p>分支不是代码副本，而是一个可移动的提交引用。合并也不是简单地“把两个目录覆盖到一起”，而是基于提交图寻找共同祖先，再计算两侧变化。</p>
+<p>假设从 C 创建 <code>feature</code>：</p>
+<pre><code class="language-text">A ← B ← C
+        ▲
+       main
+       feature
+</code></pre>
+<p>两边继续开发：</p>
+<pre><code class="language-text">          D ← E  feature
+         ↗
+A ← B ← C
+         ↘
+          F      main
+</code></pre>
+<p>这张图是理解 Merge、冲突与 Pull Request 的基础。</p>
+<h2 id="section-创建和切换分支">创建和切换分支</h2>
+<p>从当前提交创建并切换：</p>
+<pre><code class="language-bash">git switch -c feature/login
+</code></pre>
+<p>从远端主干明确创建：</p>
+<pre><code class="language-bash">git fetch origin
+git switch -c feature/login origin/main
+</code></pre>
+<p>只创建不切换：</p>
+<pre><code class="language-bash">git branch feature/login
+</code></pre>
+<p>查看：</p>
+<pre><code class="language-bash">git branch --verbose
+git log --graph --oneline --decorate --all
+</code></pre>
+<p>命名可以表达任务类型：</p>
+<pre><code class="language-text">feature/login-rate-limit
+fix/upload-timeout
+docs/git-learning
+refactor/token-accounting
+</code></pre>
+<p>分支生命周期应短而聚焦。长期存活且持续偏离主干的分支，合并成本通常会越来越高。</p>
+<h2 id="section-fast-forward只移动引用">Fast-forward：只移动引用</h2>
+<p>假设：</p>
+<pre><code class="language-text">main ─► C
+         \
+          D ← E ◄─ feature
+</code></pre>
+<p>在 <code>main</code> 上执行：</p>
+<pre><code class="language-bash">git merge feature
+</code></pre>
+<p>如果 main 没有新提交，Git 可以直接把 main 移动到 E：</p>
+<pre><code class="language-text">A ← B ← C ← D ← E
+                ▲
+          main, feature
+</code></pre>
+<p>没有新 Merge Commit，这叫 Fast-forward。</p>
+<p>只接受快进：</p>
+<pre><code class="language-bash">git merge --ff-only feature
+</code></pre>
+<p>如果不能快进就失败，适合要求线性更新的流程。</p>
+<p>强制创建 Merge Commit：</p>
+<pre><code class="language-bash">git merge --no-ff feature
+</code></pre>
+<p>即使可快进，也保留“这个功能分支在此合入”的节点。</p>
+<h2 id="section-三方合并共同祖先-两个端点">三方合并：共同祖先 + 两个端点</h2>
+<p>当两边都前进：</p>
+<pre><code class="language-text">          D ← E  feature
+         ↗
+A ← B ← C
+         ↘
+          F      main
+</code></pre>
+<p>Git 找到：</p>
+<ul>
+<li>Base：共同祖先 C；</li>
+<li>Ours：当前分支 F；</li>
+<li>Theirs：待合并分支 E。</li>
+</ul>
+<p>然后比较：</p>
+<pre><code class="language-text">C → F：main 做了什么
+C → E：feature 做了什么
+</code></pre>
+<p>如果变化可自动组合，创建 Merge Commit M：</p>
+<pre><code class="language-text">          D ← E
+         ↗     ↘
+A ← B ← C       M  main
+         ↘     ↗
+          F ───
+</code></pre>
+<p>M 有两个 Parent。查看：</p>
+<pre><code class="language-bash">git cat-file -p &lt;merge-commit&gt;
+</code></pre>
+<p>会看到两个 <code>parent</code> 字段。</p>
+<h2 id="section-冲突不是git-坏了">冲突不是“Git 坏了”</h2>
+<p>如果两边修改互不干扰：</p>
+<pre><code class="language-text">Base：第 10 行 timeout = 3
+Ours：第 20 行增加日志
+Theirs：第 30 行增加重试
+</code></pre>
+<p>Git 可以自动合并。</p>
+<p>如果两边对同一区域给出不兼容结果：</p>
+<pre><code class="language-text">Base：timeout = 3
+Ours：timeout = 5
+Theirs：timeout = 30
+</code></pre>
+<p>Git 无法判断业务意图，产生冲突。</p>
+<p>冲突标记：</p>
+<pre><code class="language-text">MARKER: &lt;&lt;&lt;&lt;&lt;&lt;&lt; HEAD
+timeout = 5
+MARKER: =======
+timeout = 30
+MARKER: &gt;&gt;&gt;&gt;&gt;&gt;&gt; feature/login
+</code></pre>
+<p>它表达：</p>
+<ul>
+<li>当前分支选择 5；</li>
+<li>待合并分支选择 30；</li>
+<li>Git 不知道最终应该是什么。</li>
+</ul>
+<p>解决冲突不是简单删除标记，而是决定正确业务结果，例如：</p>
+<pre><code class="language-text">timeout = config.requestTimeout
+</code></pre>
+<p>最终内容可能既不是 Ours，也不是 Theirs。</p>
+<h2 id="section-合并冲突时-index-有三个阶段">合并冲突时 Index 有三个阶段</h2>
+<p>冲突期间，Index 可以保存同一路径的多个版本：</p>
+<pre><code class="language-text">stage 1：Base
+stage 2：Ours
+stage 3：Theirs
+</code></pre>
+<p>查看：</p>
+<pre><code class="language-bash">git ls-files -u
+</code></pre>
+<p>读取：</p>
+<pre><code class="language-bash">git show :1:path/to/file
+git show :2:path/to/file
+git show :3:path/to/file
+</code></pre>
+<p>理解这三份内容，比只看冲突标记更适合复杂冲突。</p>
+<p>注意 <code>ours</code> 和 <code>theirs</code> 的含义依赖当前操作。在 Rebase 中，用户直觉更容易混乱，因为“当前基线”和“正在重放的提交”角色不同。遇到疑问直接查看三阶段内容。</p>
+<h2 id="section-标准冲突解决流程">标准冲突解决流程</h2>
+<p>开始前：</p>
+<pre><code class="language-bash">git status --short --branch
+git merge feature/login
+</code></pre>
+<p>发生冲突后：</p>
+<pre><code class="language-bash">git status
+git diff --name-only --diff-filter=U
+</code></pre>
+<p>逐文件：</p>
+<ol>
+<li>查看 Base/Ours/Theirs；</li>
+<li>理解双方意图；</li>
+<li>编辑最终结果；</li>
+<li>运行格式化和测试；</li>
+<li>暂存已解决文件。</li>
+</ol>
+<pre><code class="language-bash">git add path/to/resolved-file
+</code></pre>
+<p>确认没有未解决路径：</p>
+<pre><code class="language-bash">git diff --check
+git status
+</code></pre>
+<p>完成：</p>
+<pre><code class="language-bash">git commit
+</code></pre>
+<p>放弃整个合并：</p>
+<pre><code class="language-bash">git merge --abort
+</code></pre>
+<p>如果工作区在合并前就不干净，Abort 不一定能恢复所有混杂状态。因此合并前最好先提交或 Stash。</p>
+<h2 id="section-冲突类型不只有文本">冲突类型不只有文本</h2>
+<p>常见类型：</p>
+<ul>
+<li>Modify/Modify：双方修改同一文件；</li>
+<li>Add/Add：双方新增同名文件；</li>
+<li>Modify/Delete：一边修改，一边删除；</li>
+<li>Rename/Rename：双方把同一文件改成不同名字；</li>
+<li>Rename/Delete：一边重命名，一边删除；</li>
+<li>Directory/File：一边创建目录，一边创建同名文件；</li>
+<li>二进制冲突：无法逐行合并。</li>
+</ul>
+<p>Modify/Delete 不能只凭“保留还是删除”机械处理。应确认删除是否代表架构迁移，修改是否应移到新位置。</p>
+<p>二进制文件通常需要：</p>
+<ul>
+<li>选一侧版本；</li>
+<li>重新生成；</li>
+<li>使用领域专用合并工具；</li>
+<li>或避免多人并行修改。</li>
+</ul>
+<h2 id="section-ours-合并策略与-x-ours-不是一回事"><code>ours</code> 合并策略与 <code>-X ours</code> 不是一回事</h2>
+<pre><code class="language-bash">git merge -X ours feature
+</code></pre>
+<p>表示三方合并时，冲突块偏向当前分支，但非冲突变化仍会合入。</p>
+<pre><code class="language-bash">git merge -s ours feature
+</code></pre>
+<p>使用 <code>ours</code> 策略，生成的结果 Tree 基本保持当前分支，忽略对方内容，但历史上记录已合并。</p>
+<p>两者语义差异很大。除非明确理解图和内容结果，否则不要用它们“快速解决冲突”。</p>
+<h2 id="section-合并前先预览">合并前先预览</h2>
+<p>查看共同祖先：</p>
+<pre><code class="language-bash">git merge-base main feature
+</code></pre>
+<p>查看 feature 独有提交：</p>
+<pre><code class="language-bash">git log --oneline main..feature
+</code></pre>
+<p>查看从分叉点以来的最终差异：</p>
+<pre><code class="language-bash">git diff main...feature
+</code></pre>
+<p>检查是否能快进：</p>
+<pre><code class="language-bash">git merge-base --is-ancestor main feature
+</code></pre>
+<p>测试合并但暂不提交：</p>
+<pre><code class="language-bash">git merge --no-commit --no-ff feature
+</code></pre>
+<p>检查后可完成提交，或：</p>
+<pre><code class="language-bash">git merge --abort
+</code></pre>
+<h2 id="section-merge-commitsquash-merge-和-rebase-merge">Merge Commit、Squash Merge 和 Rebase Merge</h2>
+<p>平台常见三种合并方式。</p>
+<h3 id="section-merge-commit">Merge Commit</h3>
+<pre><code class="language-text">          D ← E
+         ↗     ↘
+A ← B ← C       M
+         ↘     ↗
+          F ───
+</code></pre>
+<p>优点：</p>
+<ul>
+<li>保留真实分支拓扑；</li>
+<li>原提交 ID 不变；</li>
+<li>容易看出功能分支整体边界。</li>
+</ul>
+<p>缺点：</p>
+<ul>
+<li>高频小分支会让图复杂。</li>
+</ul>
+<h3 id="section-squash-merge">Squash Merge</h3>
+<p>把 feature 最终变化压成主干上的一个新提交：</p>
+<pre><code class="language-text">A ← B ← C ← S
+</code></pre>
+<p>原分支 D、E 不成为 main 的祖先。</p>
+<p>优点：</p>
+<ul>
+<li>主干简洁；</li>
+<li>一个 PR 对应一个提交；</li>
+<li>可在合并前整理统一说明。</li>
+</ul>
+<p>缺点：</p>
+<ul>
+<li>丢失主干中的细粒度提交关系；</li>
+<li>原分支提交与主干提交 ID 不同；</li>
+<li>后续重复合并时需理解 Patch 等价而非祖先关系。</li>
+</ul>
+<h3 id="section-rebase-and-merge">Rebase and Merge</h3>
+<p>把 feature 提交复制到最新 main 后：</p>
+<pre><code class="language-text">A ← B ← C ← D&#39; ← E&#39;
+</code></pre>
+<p>优点：</p>
+<ul>
+<li>线性历史；</li>
+<li>保留多个逻辑提交。</li>
+</ul>
+<p>缺点：</p>
+<ul>
+<li>提交 ID 被重写；</li>
+<li>如果原提交质量低，主干仍会保留噪声；</li>
+<li>提交者和签名语义可能变化。</li>
+</ul>
+<p>团队应明确一种默认策略，而不是每个 PR 临时选择。</p>
+<h2 id="section-rerere记录冲突解决方式"><code>rerere</code>：记录冲突解决方式</h2>
+<p>Git 可以记录冲突形状与解决结果：</p>
+<pre><code class="language-bash">git config rerere.enabled true
+</code></pre>
+<p>以后遇到相同冲突，Git 可以复用之前的解决方案。</p>
+<p>它适合：</p>
+<ul>
+<li>长期 Rebase；</li>
+<li>维护多个发布分支；</li>
+<li>反复 Cherry-pick 补丁。</li>
+</ul>
+<p>仍应检查复用结果并运行测试，因为文本冲突相同不一定代表业务上下文完全相同。</p>
+<h2 id="section-降低冲突成本的工程习惯">降低冲突成本的工程习惯</h2>
+<ol>
+<li>分支保持短生命周期；</li>
+<li>提交只包含一个逻辑变化；</li>
+<li>避免无关全文件格式化；</li>
+<li>大规模重命名与功能修改分开；</li>
+<li>经常 Fetch 主干变化；</li>
+<li>明确代码所有权和模块边界；</li>
+<li>合并后运行测试，不只检查冲突标记；</li>
+<li>不用“选 ours/theirs 全部覆盖”代替业务判断。</li>
+</ol>
+<h2 id="section-最小三方合并实验">最小三方合并实验</h2>
+<pre><code class="language-bash">mkdir git-merge-lab
+cd git-merge-lab
+git init
+
+printf &quot;timeout=3\n&quot; &gt; config.txt
+git add config.txt
+git commit -m &quot;base&quot;
+
+git switch -c feature
+printf &quot;timeout=30\n&quot; &gt; config.txt
+git commit -am &quot;feature timeout&quot;
+
+git switch main
+printf &quot;timeout=5\n&quot; &gt; config.txt
+git commit -am &quot;main timeout&quot;
+
+git merge feature
+</code></pre>
+<p>观察：</p>
+<pre><code class="language-bash">git status
+git ls-files -u
+git show :1:config.txt
+git show :2:config.txt
+git show :3:config.txt
+</code></pre>
+<p>然后编辑最终值、<code>git add</code>、运行验证并提交。</p>
+<p>这个实验展示了冲突的真实含义：Git 已经把 Base 和两侧变化都保存好了，缺少的只是人对业务意图的判断。</p>
+
+    </article>
+  </main>
+
+  <footer class="site-footer article-footer">
+    <a href="../sections/git.html">Git 学习与实践 / 分支与协作</a>
+    <a href="https://github.com/yjd953/yjd953/blob/main/posts/git-branch-merge.md">View source ↗</a>
+  </footer>
+  <script src="../assets/site.js" defer></script>
+</body>
+</html>

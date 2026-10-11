@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="从对象数据库和提交图出发，掌握日常操作、分支协作、历史排查、故障恢复与隐私安全。">
+  <meta name="theme-color" content="#f1f1ee">
+  <title>Git 学习与实践 — Dale Yang</title>
+  <link rel="stylesheet" href="../assets/site.css">
+</head>
+<body class="section-page">
+  <div class="reading-progress" id="readingProgress" aria-hidden="true"></div>
+
+  <header class="site-header">
+    <a class="wordmark" href="../" aria-label="Dale Yang home">DY<span>.</span></a>
+    <nav aria-label="Primary">
+      <a href="../">All modules</a>
+      <a href="https://github.com/yjd953">GitHub</a>
+    </nav>
+  </header>
+
+  <main class="section-layout">
+    <header class="section-masthead">
+      <a class="back-link" href="../">← All modules</a>
+      <p class="kicker">04 / Git learning and practice</p>
+      <h1>Git 学习与实践<span>.</span></h1>
+      <p>从对象数据库和提交图出发，掌握日常操作、分支协作、历史排查、故障恢复与隐私安全。</p>
+    </header>
+
+      <section class="section-group" aria-labelledby="group-基础模型">
+        <div class="section-label">
+          <h2 id="group-基础模型">基础模型</h2>
+          <span>04 notes</span>
+        </div>
+        <div class="note-list">
+          <a class="note-row" href="../notes/git-mental-model.html">
+            <span class="note-number">01</span>
+            <span class="note-copy">
+              <span class="note-meta">Mental model / ZH / 三个区域</span>
+              <strong>Git 到底在管理什么？</strong>
+              <span class="note-description">从工作区、暂存区和本地仓库建立第一张地图，理解一次修改如何进入历史。</span>
+            </span>
+            <span class="note-arrow" aria-hidden="true">↗</span>
+          </a>
+          <a class="note-row" href="../notes/git-object-model.html">
+            <span class="note-number">02</span>
+            <span class="note-copy">
+              <span class="note-meta">Object model / ZH / Blob / Tree / Commit</span>
+              <strong>Git 的对象数据库里到底存了什么？</strong>
+              <span class="note-description">拆解 Blob、Tree、Commit、Tag 与对象 ID，理解 Git 为什么更像快照数据库。</span>
+            </span>
+            <span class="note-arrow" aria-hidden="true">↗</span>
+          </a>
+          <a class="note-row" href="../notes/git-commit-graph.html">
+            <span class="note-number">03</span>
+            <span class="note-copy">
+              <span class="note-meta">Commit graph / ZH / 引用与可达性</span>
+              <strong>分支和 HEAD 为什么只是指针？</strong>
+              <span class="note-description">沿父提交关系建立提交图，解释 Branch、HEAD、Detached HEAD 与可达对象。</span>
+            </span>
+            <span class="note-arrow" aria-hidden="true">↗</span>
+          </a>
+          <a class="note-row" href="../notes/git-daily-change-flow.html">
+            <span class="note-number">04</span>
+            <span class="note-copy">
+              <span class="note-meta">Daily workflow / ZH / Status / Add / Commit</span>
+              <strong>一次代码修改是怎样进入 Git 历史的？</strong>
+              <span class="note-description">把 status、diff、add、commit 放进同一条数据流，学会精确控制每次提交。</span>
+            </span>
+            <span class="note-arrow" aria-hidden="true">↗</span>
+          </a>
+        </div>
+      </section>
+      <section class="section-group" aria-labelledby="group-历史与恢复">
+        <div class="section-label">
+          <h2 id="group-历史与恢复">历史与恢复</h2>
+          <span>02 notes</span>
+        </div>
+        <div class="note-list">
+          <a class="note-row" href="../notes/git-inspect-history.html">
+            <span class="note-number">05</span>
+            <span class="note-copy">
+              <span class="note-meta">History inspection / ZH / Log / Show / Blame</span>
+              <strong>Git 是怎样还原每次代码变化的？</strong>
+              <span class="note-description">用 log、show、diff、blame 和文件历史追踪提交、代码行与变更来源。</span>
+            </span>
+            <span class="note-arrow" aria-hidden="true">↗</span>
+          </a>
+          <a class="note-row" href="../notes/git-undo-recovery.html">
+            <span class="note-number">06</span>
+            <span class="note-copy">
+              <span class="note-meta">Undo and recovery / ZH / 按状态选择</span>
+              <strong>写错以后，restore、reset、revert 应该选哪个？</strong>
+              <span class="note-description">按未暂存、已暂存、已提交、已推送四种状态选择撤销方式，并用 Reflog 兜底。</span>
+            </span>
+            <span class="note-arrow" aria-hidden="true">↗</span>
+          </a>
+        </div>
+      </section>
+      <section class="section-group" aria-labelledby="group-分支与协作">
+        <div class="section-label">
+          <h2 id="group-分支与协作">分支与协作</h2>
+          <span>04 notes</span>
+        </div>
+        <div class="note-list">
+          <a class="note-row" href="../notes/git-branch-merge.html">
+            <span class="note-number">07</span>
+            <span class="note-copy">
+              <span class="note-meta">Branch and merge / ZH / 三方合并</span>
+              <strong>分支、合并与冲突到底发生了什么？</strong>
+              <span class="note-description">从共同祖先解释 Fast-forward、Merge Commit、三方合并与冲突解决。</span>
+            </span>
+            <span class="note-arrow" aria-hidden="true">↗</span>
+          </a>
+          <a class="note-row" href="../notes/git-rebase-cherry-pick.html">
+            <span class="note-number">08</span>
+            <span class="note-copy">
+              <span class="note-meta">History editing / ZH / 复制提交</span>
+              <strong>Rebase 和 Cherry-pick 为什么会改写提交？</strong>
+              <span class="note-description">理解 Rebase 与 Cherry-pick 的本质是重新应用补丁，并掌握安全使用边界。</span>
+            </span>
+            <span class="note-arrow" aria-hidden="true">↗</span>
+          </a>
+          <a class="note-row" href="../notes/git-remotes.html">
+            <span class="note-number">09</span>
+            <span class="note-copy">
+              <span class="note-meta">Remotes / ZH / Fetch / Pull / Push</span>
+              <strong>本地分支和远端分支究竟是什么关系？</strong>
+              <span class="note-description">区分远端仓库、远端跟踪引用和本地分支，解释 fetch、pull、push 与 force-with-lease。</span>
+            </span>
+            <span class="note-arrow" aria-hidden="true">↗</span>
+          </a>
+          <a class="note-row" href="../notes/git-collaboration-workflow.html">
+            <span class="note-number">10</span>
+            <span class="note-copy">
+              <span class="note-meta">Collaboration / ZH / Branch / PR / Review</span>
+              <strong>一个可维护的 Git 协作流程应该怎样设计？</strong>
+              <span class="note-description">从任务分支、提交粒度、Pull Request、Review 到合并策略设计团队工作流。</span>
+            </span>
+            <span class="note-arrow" aria-hidden="true">↗</span>
+          </a>
+        </div>
+      </section>
+      <section class="section-group" aria-labelledby="group-进阶工具">
+        <div class="section-label">
+          <h2 id="group-进阶工具">进阶工具</h2>
+          <span>02 notes</span>
+        </div>
+        <div class="note-list">
+          <a class="note-row" href="../notes/git-stash-worktree-tags.html">
+            <span class="note-number">11</span>
+            <span class="note-copy">
+              <span class="note-meta">Advanced tools / ZH / 临时状态与发布点</span>
+              <strong>Stash、Worktree 和 Tag 分别解决什么问题？</strong>
+              <span class="note-description">管理临时修改、并行工作目录和稳定发布标记，避免把不同任务混在一起。</span>
+            </span>
+            <span class="note-arrow" aria-hidden="true">↗</span>
+          </a>
+          <a class="note-row" href="../notes/git-bisect-debugging.html">
+            <span class="note-number">12</span>
+            <span class="note-copy">
+              <span class="note-meta">Debugging / ZH / 二分排查</span>
+              <strong>怎样用 Git Bisect 定位引入 Bug 的提交？</strong>
+              <span class="note-description">把好提交和坏提交交给 Git，通过二分搜索和自动化测试定位回归来源。</span>
+            </span>
+            <span class="note-arrow" aria-hidden="true">↗</span>
+          </a>
+        </div>
+      </section>
+      <section class="section-group" aria-labelledby="group-工程治理">
+        <div class="section-label">
+          <h2 id="group-工程治理">工程治理</h2>
+          <span>03 notes</span>
+        </div>
+        <div class="note-list">
+          <a class="note-row" href="../notes/git-repository-hygiene.html">
+            <span class="note-number">13</span>
+            <span class="note-copy">
+              <span class="note-meta">Repository hygiene / ZH / Ignore / Attributes / LFS</span>
+              <strong>怎样保持一个 Git 仓库长期干净？</strong>
+              <span class="note-description">处理忽略规则、换行、二进制文件、大文件、生成物和提交前检查。</span>
+            </span>
+            <span class="note-arrow" aria-hidden="true">↗</span>
+          </a>
+          <a class="note-row" href="../notes/git-identity-privacy.html">
+            <span class="note-number">14</span>
+            <span class="note-copy">
+              <span class="note-meta">Identity and privacy / ZH / Author / Committer</span>
+              <strong>Git 提交身份、邮箱与签名是怎样工作的？</strong>
+              <span class="note-description">区分 Author 与 Committer，理解邮箱暴露、仓库级身份、Noreply 邮箱和签名验证。</span>
+            </span>
+            <span class="note-arrow" aria-hidden="true">↗</span>
+          </a>
+          <a class="note-row" href="../notes/git-history-rewrite.html">
+            <span class="note-number">15</span>
+            <span class="note-copy">
+              <span class="note-meta">History rewrite / ZH / Rewrite / Cleanup</span>
+              <strong>怎样安全地改写历史并清除敏感信息？</strong>
+              <span class="note-description">从对象可达性出发，处理错误邮箱、密钥、大文件和整仓历史重建，并验证清理结果。</span>
+            </span>
+            <span class="note-arrow" aria-hidden="true">↗</span>
+          </a>
+        </div>
+      </section>
+  </main>
+
+  <footer class="site-footer">
+    <a href="../">Dale Yang / Engineering paths</a>
+    <span>15 篇文章</span>
+  </footer>
+  <script src="../assets/site.js" defer></script>
+</body>
+</html>

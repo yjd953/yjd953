@@ -1,0 +1,421 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="把 status、diff、add、commit 放进同一条数据流，学会精确控制每次提交。">
+  <meta name="theme-color" content="#f1f1ee">
+  <title>一次代码修改是怎样进入 Git 历史的？ — Dale Yang</title>
+  <link rel="stylesheet" href="../assets/site.css">
+</head>
+<body class="article-page">
+  <div class="reading-progress" id="readingProgress" aria-hidden="true"></div>
+
+  <header class="site-header">
+    <a class="wordmark" href="../" aria-label="Dale Yang home">DY<span>.</span></a>
+    <nav aria-label="Primary">
+      <a href="../sections/git.html">Git 学习与实践</a>
+      <a href="https://github.com/yjd953">GitHub</a>
+    </nav>
+  </header>
+
+  <main class="article-layout">
+    <header class="article-masthead">
+      <a class="back-link" href="../sections/git.html">← Git 学习与实践</a>
+      <p class="kicker">04.04 / Daily workflow / ZH</p>
+      <h1>一次代码修改是怎样进入 Git 历史的？</h1>
+      <p class="article-deck">把 status、diff、add、commit 放进同一条数据流，学会精确控制每次提交。</p>
+    </header>
+
+    <article class="prose">
+      <p>Git 日常操作并不复杂，真正难的是准确判断：</p>
+<ul>
+<li>当前改动在哪里；</li>
+<li>下一次提交会包含什么；</li>
+<li>哪些变化不该混进来；</li>
+<li>提交以后如何验证。</li>
+</ul>
+<p>一套稳健流程可以概括为：</p>
+<pre><code class="language-text">先看状态
+→ 再看差异
+→ 选择性暂存
+→ 检查暂存差异
+→ 创建提交
+→ 检查提交结果
+</code></pre>
+<p>对应命令：</p>
+<pre><code class="language-bash">git status --short --branch
+git diff
+git add -p
+git diff --staged
+git commit
+git show --stat HEAD
+</code></pre>
+<p>这套流程比直接使用 <code>git add . &amp;&amp; git commit</code> 更慢几秒，却能显著降低误提交。</p>
+<h2 id="section-第一步确认自己在哪个仓库哪个分支">第一步：确认自己在哪个仓库、哪个分支</h2>
+<p>先运行：</p>
+<pre><code class="language-bash">git status --short --branch
+</code></pre>
+<p>示例：</p>
+<pre><code class="language-text">## feature/git-notes...origin/feature/git-notes [ahead 2]
+ M README.md
+?? posts/git-basics.md
+</code></pre>
+<p>你已经知道：</p>
+<ul>
+<li>当前分支是 <code>feature/git-notes</code>；</li>
+<li>上游是 <code>origin/feature/git-notes</code>；</li>
+<li>本地领先 2 个提交；</li>
+<li><code>README.md</code> 已修改但未暂存；</li>
+<li><code>posts/git-basics.md</code> 尚未跟踪。</li>
+</ul>
+<p>进一步确认仓库根目录：</p>
+<pre><code class="language-bash">git rev-parse --show-toplevel
+</code></pre>
+<p>在多仓库、子模块或大型工作区中，这一步能避免在错误目录提交。</p>
+<h2 id="section-第二步查看真正修改了什么">第二步：查看真正修改了什么</h2>
+<p>查看工作区相对暂存区的差异：</p>
+<pre><code class="language-bash">git diff
+</code></pre>
+<p>只看文件名和状态：</p>
+<pre><code class="language-bash">git diff --name-status
+</code></pre>
+<p>统计：</p>
+<pre><code class="language-bash">git diff --stat
+</code></pre>
+<p>按单词显示：</p>
+<pre><code class="language-bash">git diff --word-diff
+</code></pre>
+<p>只检查某个文件：</p>
+<pre><code class="language-bash">git diff -- path/to/file
+</code></pre>
+<p>Diff 的基本结构：</p>
+<pre><code class="language-diff">diff --git a/app.js b/app.js
+index 1111111..2222222 100644
+--- a/app.js
++++ b/app.js
+@@ -10,3 +10,4 @@
+ const port = 3000;
++const timeout = 5000;
+ start(port);
+</code></pre>
+<p>其中：</p>
+<ul>
+<li><code>---</code> 是旧文件；</li>
+<li><code>+++</code> 是新文件；</li>
+<li><code>@@</code> 描述代码块位置；</li>
+<li><code>-</code> 是删除；</li>
+<li><code>+</code> 是增加；</li>
+<li>无前缀是上下文。</li>
+</ul>
+<p>Diff 是从两份内容计算出来的，不是编辑器操作录像。</p>
+<h2 id="section-第三步把一次任务拆成逻辑提交">第三步：把一次任务拆成逻辑提交</h2>
+<p>一个提交应该表达一件可解释的事情，例如：</p>
+<pre><code class="language-text">fix: avoid duplicate order submission
+test: cover retry after timeout
+docs: explain Git object model
+</code></pre>
+<p>不理想的提交：</p>
+<pre><code class="language-text">update
+misc changes
+fix stuff
+</code></pre>
+<p>提交边界主要依靠暂存区控制。</p>
+<p>暂存完整文件：</p>
+<pre><code class="language-bash">git add README.md
+</code></pre>
+<p>暂存多个明确路径：</p>
+<pre><code class="language-bash">git add src/order.ts tests/order.test.ts
+</code></pre>
+<p>逐块暂存：</p>
+<pre><code class="language-bash">git add -p
+</code></pre>
+<p>常见交互：</p>
+<div class="table-scroll"><table>
+<thead>
+<tr>
+<th>按键</th>
+<th>含义</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>y</code></td>
+<td>暂存当前代码块</td>
+</tr>
+<tr>
+<td><code>n</code></td>
+<td>跳过当前代码块</td>
+</tr>
+<tr>
+<td><code>s</code></td>
+<td>尝试拆分代码块</td>
+</tr>
+<tr>
+<td><code>e</code></td>
+<td>手工编辑要暂存的 Patch</td>
+</tr>
+<tr>
+<td><code>q</code></td>
+<td>退出</td>
+</tr>
+<tr>
+<td><code>?</code></td>
+<td>查看帮助</td>
+</tr>
+</tbody></table></div>
+<p>如果一个文件同时包含功能修改和格式化，<code>git add -p</code> 可以避免把二者混在同一提交中。</p>
+<h2 id="section-第四步检查暂存区而不是相信记忆">第四步：检查暂存区，而不是相信记忆</h2>
+<p>暂存以后：</p>
+<pre><code class="language-bash">git diff --staged
+</code></pre>
+<p>这条命令回答：</p>
+<blockquote>
+<p>如果现在执行 <code>git commit</code>，相对当前 HEAD 会提交什么？</p>
+</blockquote>
+<p>只看统计：</p>
+<pre><code class="language-bash">git diff --staged --stat
+</code></pre>
+<p>查看暂存文件列表：</p>
+<pre><code class="language-bash">git diff --staged --name-only
+</code></pre>
+<p>如果暂存错了文件，可以移出暂存区但保留工作区修改：</p>
+<pre><code class="language-bash">git restore --staged path/to/file
+</code></pre>
+<p>然后重新选择。</p>
+<p>不要依赖 <code>git status</code> 的文件名列表来代替 Diff 审查。文件名只能告诉你“哪个文件变了”，不能告诉你“变成了什么”。</p>
+<h2 id="section-第五步提交时到底发生了什么">第五步：提交时到底发生了什么</h2>
+<p>执行：</p>
+<pre><code class="language-bash">git commit -m &quot;docs: add Git mental model&quot;
+</code></pre>
+<p>Git 大致完成：</p>
+<ol>
+<li>读取暂存区；</li>
+<li>根据 Index 写出 Tree；</li>
+<li>读取当前 HEAD 作为 Parent；</li>
+<li>读取作者与提交者信息；</li>
+<li>写入时间和 Message；</li>
+<li>创建 Commit 对象；</li>
+<li>把当前分支移动到新 Commit；</li>
+<li>更新 Reflog。</li>
+</ol>
+<p>工作区未暂存的变化不会进入该提交。</p>
+<p>提交后暂存区通常与新 HEAD 一致，而工作区可能仍保留未提交修改。</p>
+<h2 id="section-git-commit-a-的边界"><code>git commit -a</code> 的边界</h2>
+<p>命令：</p>
+<pre><code class="language-bash">git commit -am &quot;fix: update tracked files&quot;
+</code></pre>
+<p>会自动暂存已跟踪文件的修改和删除，但不会自动加入新建的未跟踪文件。</p>
+<p>它适合范围明确的小修改，但容易让人跳过暂存差异检查。更安全的日常习惯仍然是：</p>
+<pre><code class="language-bash">git add &lt;explicit-paths&gt;
+git diff --staged
+git commit
+</code></pre>
+<h2 id="section-提交说明应该记录什么">提交说明应该记录什么</h2>
+<p>好的提交说明回答：</p>
+<ul>
+<li>这次变化的意图是什么；</li>
+<li>为什么需要它；</li>
+<li>是否存在不明显的约束。</li>
+</ul>
+<p>标题示例：</p>
+<pre><code class="language-text">fix: preserve draft when upload fails
+feat: add Git learning section
+docs: explain author and committer identity
+refactor: isolate token accounting
+test: cover empty repository state
+</code></pre>
+<p>如果需要正文：</p>
+<pre><code class="language-bash">git commit
+</code></pre>
+<p>在编辑器中写：</p>
+<pre><code class="language-text">fix: avoid exposing commit email
+
+Rebuild the public branch from the current snapshot so the old author
+metadata is no longer reachable from published refs.
+
+The repository-level identity remains unchanged.
+</code></pre>
+<p>标题描述结果，正文说明原因与上下文。不要只复述代码实现。</p>
+<h2 id="section-提交钩子与检查">提交钩子与检查</h2>
+<p>提交过程中可能触发 Hook：</p>
+<pre><code class="language-text">.git/hooks/pre-commit
+.git/hooks/commit-msg
+</code></pre>
+<p>团队也可能使用：</p>
+<ul>
+<li>Husky；</li>
+<li>pre-commit；</li>
+<li>Lefthook；</li>
+<li>lint-staged；</li>
+<li>自定义安全扫描。</li>
+</ul>
+<p>Hook 可以检查：</p>
+<ul>
+<li>格式化；</li>
+<li>Lint；</li>
+<li>单元测试；</li>
+<li>Commit Message；</li>
+<li>密钥和大文件；</li>
+<li>禁止路径。</li>
+</ul>
+<p><code>--no-verify</code> 可以绕过部分 Hook：</p>
+<pre><code class="language-bash">git commit --no-verify
+</code></pre>
+<p>但除非你明确知道检查错误，否则不应把它当成常规解决方法。</p>
+<h2 id="section-提交后如何验证">提交后如何验证</h2>
+<p>查看刚创建的提交：</p>
+<pre><code class="language-bash">git show --stat HEAD
+git show --name-status HEAD
+git show HEAD
+</code></pre>
+<p>查看元数据：</p>
+<pre><code class="language-bash">git show --no-patch --format=fuller HEAD
+</code></pre>
+<p>这一步尤其适合检查：</p>
+<ul>
+<li>Author 邮箱；</li>
+<li>Committer 邮箱；</li>
+<li>提交时间；</li>
+<li>Message；</li>
+<li>是否包含意外文件。</li>
+</ul>
+<p>确认状态：</p>
+<pre><code class="language-bash">git status --short --branch
+</code></pre>
+<p>如果工作区仍有修改，不代表提交失败；可能只是部分修改没有暂存。</p>
+<h2 id="section-修改最后一次提交">修改最后一次提交</h2>
+<p>如果提交还未共享，只是漏了一个文件：</p>
+<pre><code class="language-bash">git add missing-file
+git commit --amend --no-edit
+</code></pre>
+<p>修改说明：</p>
+<pre><code class="language-bash">git commit --amend
+</code></pre>
+<p>Amend 不是“编辑原提交”，而是创建一个新 Commit，然后把当前分支移过去：</p>
+<pre><code class="language-text">原：A ← B
+新：A ← B&#39;
+</code></pre>
+<p>因此 Commit ID 会变化。</p>
+<p>如果 B 已经推送并被别人基于它工作，Amend 会导致协作历史分叉。公共历史优先用新提交修复，而不是随意改写。</p>
+<h2 id="section-推送前先获取远端状态">推送前先获取远端状态</h2>
+<p>本地提交完成后，远端可能已经变化。先：</p>
+<pre><code class="language-bash">git fetch origin
+git status --short --branch
+</code></pre>
+<p>比较：</p>
+<pre><code class="language-bash">git log --oneline --left-right HEAD...origin/main
+</code></pre>
+<p>只有本地提交：</p>
+<pre><code class="language-text">&lt; local commit
+</code></pre>
+<p>只有远端提交：</p>
+<pre><code class="language-text">&gt; remote commit
+</code></pre>
+<p>如果双方都有提交，需要按团队策略 Merge 或 Rebase，而不是直接强推覆盖。</p>
+<h2 id="section-push-上传的不是整个项目目录">Push 上传的不是“整个项目目录”</h2>
+<p>执行：</p>
+<pre><code class="language-bash">git push origin feature/git-notes
+</code></pre>
+<p>Git 会协商：</p>
+<ol>
+<li>远端已经有哪些对象；</li>
+<li>本地有哪些远端缺失的对象；</li>
+<li>压缩并传输缺失对象；</li>
+<li>请求远端更新对应引用。</li>
+</ol>
+<p>如果远端引用无法 Fast-forward，普通 Push 会拒绝：</p>
+<pre><code class="language-text">non-fast-forward
+</code></pre>
+<p>这是为了防止你无意间让远端已有提交失去引用。</p>
+<p>需要有意识改写历史时，优先：</p>
+<pre><code class="language-bash">git push --force-with-lease
+</code></pre>
+<p>它会检查远端是否仍处于你预期的位置。相比 <code>--force</code>，可以减少覆盖别人新提交的风险。</p>
+<h2 id="section-gitignore-不会自动取消已跟踪文件"><code>.gitignore</code> 不会自动取消已跟踪文件</h2>
+<p>添加：</p>
+<pre><code class="language-gitignore">.env
+dist/
+*.log
+</code></pre>
+<p>只影响尚未跟踪的路径。如果 <code>.env</code> 已经提交：</p>
+<pre><code class="language-bash">git rm --cached .env
+git commit -m &quot;chore: stop tracking local environment&quot;
+</code></pre>
+<p>这只让未来版本不再跟踪，并不会从旧历史中删除秘密。秘密一旦提交，应当：</p>
+<ol>
+<li>立即吊销或轮换；</li>
+<li>再评估是否需要改写历史。</li>
+</ol>
+<p>轮换凭证比清理 Git 历史更优先，因为别人可能已经拿到旧值。</p>
+<h2 id="section-二进制生成物和大文件">二进制、生成物和大文件</h2>
+<p>提交前检查：</p>
+<pre><code class="language-bash">git diff --staged --stat
+</code></pre>
+<p>如果突然出现：</p>
+<pre><code class="language-text">node_modules/
+build/
+*.apk
+*.zip
+database.dump
+</code></pre>
+<p>应先确认是否真的应该进入仓库。</p>
+<p>大文件进入历史后，即使后续删除，旧 Blob 仍在历史中，占据 clone 体积。适合版本化的大二进制可以考虑 Git LFS，但需要团队和托管平台共同支持。</p>
+<h2 id="section-一套可重复的日常模板">一套可重复的日常模板</h2>
+<p>开始任务：</p>
+<pre><code class="language-bash">git status --short --branch
+git fetch origin
+git switch -c feature/&lt;task&gt; origin/main
+</code></pre>
+<p>开发过程中：</p>
+<pre><code class="language-bash">git diff
+git add -p
+git diff --staged
+</code></pre>
+<p>验证：</p>
+<pre><code class="language-bash">npm test
+# 或项目实际测试命令
+</code></pre>
+<p>提交：</p>
+<pre><code class="language-bash">git commit -m &quot;feat: describe the change&quot;
+git show --stat --format=fuller HEAD
+</code></pre>
+<p>推送：</p>
+<pre><code class="language-bash">git push -u origin feature/&lt;task&gt;
+</code></pre>
+<p>之后创建 Pull Request。</p>
+<h2 id="section-最小练习同一个文件拆成两个提交">最小练习：同一个文件拆成两个提交</h2>
+<p>创建文件：</p>
+<pre><code class="language-bash">printf &quot;title\n&quot; &gt; note.txt
+git add note.txt
+git commit -m &quot;docs: add note&quot;
+</code></pre>
+<p>然后同时增加两个独立部分：</p>
+<pre><code class="language-text">title
+
+Git basics
+
+Unrelated personal reminder
+</code></pre>
+<p>使用：</p>
+<pre><code class="language-bash">git add -p note.txt
+</code></pre>
+<p>只暂存 <code>Git basics</code>，检查：</p>
+<pre><code class="language-bash">git diff
+git diff --staged
+</code></pre>
+<p>提交后再处理剩余变化。</p>
+<p>这个练习的重点不是命令本身，而是建立习惯：</p>
+<blockquote>
+<p>每次提交前，都能准确说出暂存区里有哪些变化，以及它们为什么应该一起进入历史。</p>
+</blockquote>
+
+    </article>
+  </main>
+
+  <footer class="site-footer article-footer">
+    <a href="../sections/git.html">Git 学习与实践 / 基础模型</a>
+    <a href="https://github.com/yjd953/yjd953/blob/main/posts/git-daily-change-flow.md">View source ↗</a>
+  </footer>
+  <script src="../assets/site.js" defer></script>
+</body>
+</html>

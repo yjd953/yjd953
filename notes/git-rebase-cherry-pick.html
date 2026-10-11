@@ -1,0 +1,378 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="理解 Rebase 与 Cherry-pick 的本质是重新应用补丁，并掌握安全使用边界。">
+  <meta name="theme-color" content="#f1f1ee">
+  <title>Rebase 和 Cherry-pick 为什么会改写提交？ — Dale Yang</title>
+  <link rel="stylesheet" href="../assets/site.css">
+</head>
+<body class="article-page">
+  <div class="reading-progress" id="readingProgress" aria-hidden="true"></div>
+
+  <header class="site-header">
+    <a class="wordmark" href="../" aria-label="Dale Yang home">DY<span>.</span></a>
+    <nav aria-label="Primary">
+      <a href="../sections/git.html">Git 学习与实践</a>
+      <a href="https://github.com/yjd953">GitHub</a>
+    </nav>
+  </header>
+
+  <main class="article-layout">
+    <header class="article-masthead">
+      <a class="back-link" href="../sections/git.html">← Git 学习与实践</a>
+      <p class="kicker">04.08 / History editing / ZH</p>
+      <h1>Rebase 和 Cherry-pick 为什么会改写提交？</h1>
+      <p class="article-deck">理解 Rebase 与 Cherry-pick 的本质是重新应用补丁，并掌握安全使用边界。</p>
+    </header>
+
+    <article class="prose">
+      <p>Rebase 常被描述为“把分支移动到最新主干”，Cherry-pick 常被描述为“拿一个提交过来”。这两个说法适合操作层，但没有说明本质。</p>
+<p>更准确地说：</p>
+<blockquote>
+<p>Git 不能把已有 Commit 原地换父节点；它只能计算变化，再基于新父节点创建新的 Commit。</p>
+</blockquote>
+<p>因此 Rebase 和 Cherry-pick 都是在“重新应用变化”，而不是搬运原对象。</p>
+<h2 id="section-commit-id-为什么一定会变化">Commit ID 为什么一定会变化</h2>
+<p>Commit 对象包含：</p>
+<ul>
+<li>Tree；</li>
+<li>Parent；</li>
+<li>Author；</li>
+<li>Committer；</li>
+<li>时间；</li>
+<li>Message。</li>
+</ul>
+<p>假设：</p>
+<pre><code class="language-text">A ← B ← C
+     \
+      D ← E  feature
+</code></pre>
+<p>把 feature Rebase 到 C：</p>
+<pre><code class="language-text">A ← B ← C ← D&#39; ← E&#39;
+</code></pre>
+<p>即使 D&#39; 最终文件内容与 D 等价：</p>
+<ul>
+<li>D&#39; 的 Parent 从 B 变成 C；</li>
+<li>Committer 时间通常变化；</li>
+<li>D&#39; 的 Commit ID 必然不同；</li>
+<li>E&#39; 的 Parent 从 D 变成 D&#39;，所以也不同。</li>
+</ul>
+<p>旧 D、E 没有被修改；只是 feature 引用从 E 移到 E&#39;。</p>
+<h2 id="section-rebase-的概念步骤">Rebase 的概念步骤</h2>
+<p>执行：</p>
+<pre><code class="language-bash">git switch feature
+git rebase main
+</code></pre>
+<p>Git 大致会：</p>
+<ol>
+<li>找到 feature 与 main 的共同祖先 B；</li>
+<li>找出 feature 独有提交 D、E；</li>
+<li>暂时把当前基线移动到 main 的 C；</li>
+<li>依次计算并应用 D、E 的变化；</li>
+<li>创建 D&#39;、E&#39;；</li>
+<li>把 feature 指向 E&#39;。</li>
+</ol>
+<p>可以近似理解为：</p>
+<pre><code class="language-text">for commit in [D, E]:
+    patch = diff(commit.parent, commit)
+    apply(patch, current_base)
+    current_base = create_new_commit()
+</code></pre>
+<p>真实实现会处理 Merge、空提交、重命名检测等更多细节，但心智模型一致。</p>
+<h2 id="section-为什么-rebase-会冲突">为什么 Rebase 会冲突</h2>
+<p>D 原本是在 B 上开发，它的 Patch 能干净应用到 B，不代表能应用到 C。</p>
+<p>如果 main 的 C 修改了 D 依赖的同一区域：</p>
+<pre><code class="language-text">B → C：timeout 3 改为 5
+B → D：timeout 3 改为 30
+</code></pre>
+<p>重放 D 时发生冲突。</p>
+<p>解决流程：</p>
+<pre><code class="language-bash">git status
+# 编辑冲突文件
+git add &lt;resolved-files&gt;
+git rebase --continue
+</code></pre>
+<p>跳过当前提交：</p>
+<pre><code class="language-bash">git rebase --skip
+</code></pre>
+<p>这会丢弃该提交的变化，应谨慎使用。</p>
+<p>放弃整个 Rebase：</p>
+<pre><code class="language-bash">git rebase --abort
+</code></pre>
+<p>回到开始前状态。</p>
+<h2 id="section-rebase-中-ourstheirs-为什么反直觉">Rebase 中 Ours/Theirs 为什么反直觉</h2>
+<p>合并冲突时，人们通常理解：</p>
+<ul>
+<li>Ours：当前分支；</li>
+<li>Theirs：被合入分支。</li>
+</ul>
+<p>Rebase 时，Git 先把当前工作位置放到新基线，再逐个重放原分支提交。于是：</p>
+<ul>
+<li>Ours 往往是新基线及已重放结果；</li>
+<li>Theirs 往往是当前正在重放的原提交。</li>
+</ul>
+<p>不要只凭名称选择：</p>
+<pre><code class="language-bash">git checkout --ours file
+git checkout --theirs file
+</code></pre>
+<p>先检查：</p>
+<pre><code class="language-bash">git show :1:file
+git show :2:file
+git show :3:file
+</code></pre>
+<p>并理解最终业务结果。</p>
+<h2 id="section-rebase-main-与-rebase-onto"><code>rebase main</code> 与 <code>rebase --onto</code></h2>
+<p>普通：</p>
+<pre><code class="language-bash">git rebase main
+</code></pre>
+<p>将当前分支独有提交重放到 main。</p>
+<p>更精确的：</p>
+<pre><code class="language-bash">git rebase --onto &lt;new-base&gt; &lt;old-base&gt; &lt;branch&gt;
+</code></pre>
+<p>含义：</p>
+<blockquote>
+<p>找出 branch 中从 old-base 之后的提交，把它们重放到 new-base。</p>
+</blockquote>
+<p>示例：</p>
+<pre><code class="language-text">A ← B ← C ← D  main
+     \
+      E ← F ← G  feature
+          ▲
+        subfeature
+</code></pre>
+<p>如果只想把 F、G 移到 D，而不带 E：</p>
+<pre><code class="language-bash">git rebase --onto main E feature
+</code></pre>
+<p>结果：</p>
+<pre><code class="language-text">A ← B ← C ← D ← F&#39; ← G&#39;
+</code></pre>
+<p><code>--onto</code> 是拆分错误基线、移动提交片段的重要工具，但执行前应画提交图。</p>
+<h2 id="section-interactive-rebase重写一段本地历史">Interactive Rebase：重写一段本地历史</h2>
+<pre><code class="language-bash">git rebase -i HEAD~5
+</code></pre>
+<p>Git 打开待重放提交列表：</p>
+<pre><code class="language-text">pick a111 add parser
+pick b222 fix typo
+pick c333 add tests
+pick d444 debug output
+pick e555 remove debug output
+</code></pre>
+<p>可以改成：</p>
+<pre><code class="language-text">pick a111 add parser
+fixup b222 fix typo
+pick c333 add tests
+fixup d444 debug output
+fixup e555 remove debug output
+</code></pre>
+<p>也可以：</p>
+<ul>
+<li>重排顺序；</li>
+<li>修改 Message；</li>
+<li>暂停编辑内容；</li>
+<li>删除提交；</li>
+<li>拆分提交。</li>
+</ul>
+<p>拆分一个提交：</p>
+<pre><code class="language-text">edit abc123 mixed change
+</code></pre>
+<p>Rebase 暂停后：</p>
+<pre><code class="language-bash">git reset HEAD^
+git add -p
+git commit -m &quot;first logical change&quot;
+git add -p
+git commit -m &quot;second logical change&quot;
+git rebase --continue
+</code></pre>
+<h2 id="section-autosquash-与-fixup-提交"><code>--autosquash</code> 与 Fixup 提交</h2>
+<p>开发时发现旧提交需要补充：</p>
+<pre><code class="language-bash">git commit --fixup=&lt;target-commit&gt;
+</code></pre>
+<p>会创建类似：</p>
+<pre><code class="language-text">fixup! original subject
+</code></pre>
+<p>整理：</p>
+<pre><code class="language-bash">git rebase -i --autosquash &lt;base&gt;
+</code></pre>
+<p>Git 自动把 Fixup 移到目标提交后并标记 <code>fixup</code>。</p>
+<p>适合个人功能分支在 Review 前整理，但不要对已经被协作者引用的提交随意执行。</p>
+<h2 id="section-cherry-pick把指定提交的变化应用到当前位置">Cherry-pick：把指定提交的变化应用到当前位置</h2>
+<p>假设：</p>
+<pre><code class="language-text">main:    A ← B ← C
+release: A ← R1
+                 ▲
+                HEAD
+</code></pre>
+<p>C 是一个紧急修复，要带到 release：</p>
+<pre><code class="language-bash">git cherry-pick C
+</code></pre>
+<p>结果：</p>
+<pre><code class="language-text">main:    A ← B ← C
+release: A ← R1 ← C&#39;
+</code></pre>
+<p>C&#39;：</p>
+<ul>
+<li>内容变化通常等价于 C；</li>
+<li>Parent 是 R1；</li>
+<li>Commit ID 不同；</li>
+<li>Author 通常保留；</li>
+<li>Committer 是执行 Cherry-pick 的人。</li>
+</ul>
+<p>查看：</p>
+<pre><code class="language-bash">git show --format=fuller C&#39;
+</code></pre>
+<h2 id="section-cherry-pick-多个提交">Cherry-pick 多个提交</h2>
+<p>按顺序：</p>
+<pre><code class="language-bash">git cherry-pick A B C
+</code></pre>
+<p>连续范围，不包含 A：</p>
+<pre><code class="language-bash">git cherry-pick A..C
+</code></pre>
+<p>包含 A：</p>
+<pre><code class="language-bash">git cherry-pick A^..C
+</code></pre>
+<p>只把变化放入暂存区，不立即提交：</p>
+<pre><code class="language-bash">git cherry-pick --no-commit &lt;commit&gt;
+</code></pre>
+<p>适合将多个提交合成一个新提交，但会丢失原有提交边界。</p>
+<p>发生冲突：</p>
+<pre><code class="language-bash">git add &lt;resolved&gt;
+git cherry-pick --continue
+</code></pre>
+<p>放弃：</p>
+<pre><code class="language-bash">git cherry-pick --abort
+</code></pre>
+<h2 id="section-cherry-pick-merge-commit">Cherry-pick Merge Commit</h2>
+<p>Merge Commit 有多个父节点，Git 不知道应该以哪个父节点为主线计算变化。</p>
+<p>需要：</p>
+<pre><code class="language-bash">git cherry-pick -m 1 &lt;merge-commit&gt;
+</code></pre>
+<p><code>-m 1</code> 表示以第一个父提交为 Mainline，应用 Merge 相对该父节点引入的结果。</p>
+<p>这不是“选择第一个分支的内容”。执行前应查看：</p>
+<pre><code class="language-bash">git show --no-patch --format=raw &lt;merge-commit&gt;
+git diff &lt;merge&gt;^1 &lt;merge&gt;
+git diff &lt;merge&gt;^2 &lt;merge&gt;
+</code></pre>
+<h2 id="section-rebasemergecherry-pick-怎样选择">Rebase、Merge、Cherry-pick 怎样选择</h2>
+<h3 id="section-merge">Merge</h3>
+<p>保留双方历史关系：</p>
+<pre><code class="language-text">适合：公共分支、需要保留分支拓扑
+代价：可能增加 Merge Commit
+</code></pre>
+<h3 id="section-rebase">Rebase</h3>
+<p>把一段提交复制到新基线：</p>
+<pre><code class="language-text">适合：整理自己的未共享功能分支、保持线性
+代价：Commit ID 改变，需要强推已发布分支
+</code></pre>
+<h3 id="section-cherry-pick">Cherry-pick</h3>
+<p>挑选少数提交复制到当前位置：</p>
+<pre><code class="language-text">适合：Release 补丁、回迁修复、选择性复用
+代价：产生等价但不同 ID 的重复提交
+</code></pre>
+<p>不要把 Cherry-pick 当成长期同步分支的方式。重复挑选会让祖先关系和 Patch 等价关系难以判断。</p>
+<h2 id="section-为什么不要-rebase-公共历史">为什么“不要 Rebase 公共历史”</h2>
+<p>假设远端：</p>
+<pre><code class="language-text">A ← B ← C  main
+</code></pre>
+<p>同事从 C 创建工作：</p>
+<pre><code class="language-text">A ← B ← C ← X
+</code></pre>
+<p>你把 B、C Rebase 成 B&#39;、C&#39; 并强推：</p>
+<pre><code class="language-text">A ← B&#39; ← C&#39;  main
+</code></pre>
+<p>同事本地仍有旧 C 和 X。Pull 时 Git 看到两条不同历史，不能把 C 和 C&#39; 当成同一个提交，即使 Patch 相近。</p>
+<p>团队需要额外协调：</p>
+<pre><code class="language-bash">git fetch origin
+git rebase --onto origin/main &lt;old-C&gt; &lt;their-branch&gt;
+</code></pre>
+<p>因此规则不是“Rebase 危险”，而是：</p>
+<blockquote>
+<p>对共享引用进行非协调改写，会让所有基于旧图工作的人承担迁移成本。</p>
+</blockquote>
+<h2 id="section-强推时为什么优先-force-with-lease">强推时为什么优先 <code>--force-with-lease</code></h2>
+<p>Rebase 后分支不再是远端旧分支的快进，普通 Push 会拒绝。</p>
+<p>使用：</p>
+<pre><code class="language-bash">git push --force-with-lease origin feature
+</code></pre>
+<p>它表达：</p>
+<blockquote>
+<p>只有远端 feature 仍指向我最后看到的位置时，才允许覆盖。</p>
+</blockquote>
+<p>如果同事在你 Rebase 期间推了新提交，Lease 不匹配，Push 失败。</p>
+<p><code>--force</code> 则不做这层保护，可能直接让他人提交从远端引用中消失。</p>
+<p>执行强推前：</p>
+<pre><code class="language-bash">git fetch origin
+git log --graph --oneline --decorate --all
+git log --left-right --oneline origin/feature...feature
+</code></pre>
+<h2 id="section-patch-等价与-git-cherry">Patch 等价与 <code>git cherry</code></h2>
+<p>Rebase 或 Cherry-pick 后，Commit ID 不同，但变化可能等价。</p>
+<p>查看：</p>
+<pre><code class="language-bash">git cherry main feature
+</code></pre>
+<p>输出：</p>
+<pre><code class="language-text">+ abc123  只在 feature 中，没有等价 Patch
+- def456  虽然 ID 不同，但 main 已有等价 Patch
+</code></pre>
+<p>Patch ID 忽略部分元数据，尝试比较变化等价性。它有局限，但在判断提交是否已被 Cherry-pick 时有帮助。</p>
+<h2 id="section-安全实践">安全实践</h2>
+<p>Rebase 前：</p>
+<pre><code class="language-bash">git status --short
+git branch backup/before-rebase
+git fetch origin
+</code></pre>
+<p>Rebase 后：</p>
+<pre><code class="language-bash">git range-diff backup/before-rebase...feature \
+               origin/main...feature
+</code></pre>
+<p><code>range-diff</code> 用于比较两组提交序列，适合检查 Rebase 前后是否保留了预期变化。</p>
+<p>冲突完成后：</p>
+<pre><code class="language-bash">git diff --check
+&lt;运行测试&gt;
+git log --graph --oneline --decorate --all
+</code></pre>
+<p>如果结果错误：</p>
+<pre><code class="language-bash">git reflog
+git reset --hard backup/before-rebase
+</code></pre>
+<h2 id="section-最小实验">最小实验</h2>
+<pre><code class="language-bash">mkdir git-rebase-lab
+cd git-rebase-lab
+git init
+
+printf &quot;base\n&quot; &gt; demo.txt
+git add demo.txt
+git commit -m &quot;A&quot;
+
+git switch -c feature
+printf &quot;feature 1\n&quot; &gt;&gt; demo.txt
+git commit -am &quot;B&quot;
+printf &quot;feature 2\n&quot; &gt;&gt; demo.txt
+git commit -am &quot;C&quot;
+
+git switch main
+printf &quot;main\n&quot; &gt; main.txt
+git add main.txt
+git commit -m &quot;D&quot;
+
+git switch feature
+git branch before-rebase
+git rebase main
+</code></pre>
+<p>比较：</p>
+<pre><code class="language-bash">git log --graph --oneline --decorate --all
+git range-diff main...before-rebase main...feature
+</code></pre>
+<p>你会看到 B、C 变成新的提交，但它们表达的变化被重新应用到了 D 之后。</p>
+
+    </article>
+  </main>
+
+  <footer class="site-footer article-footer">
+    <a href="../sections/git.html">Git 学习与实践 / 分支与协作</a>
+    <a href="https://github.com/yjd953/yjd953/blob/main/posts/git-rebase-cherry-pick.md">View source ↗</a>
+  </footer>
+  <script src="../assets/site.js" defer></script>
+</body>
+</html>

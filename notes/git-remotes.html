@@ -1,0 +1,393 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="区分远端仓库、远端跟踪引用和本地分支，解释 fetch、pull、push 与 force-with-lease。">
+  <meta name="theme-color" content="#f1f1ee">
+  <title>本地分支和远端分支究竟是什么关系？ — Dale Yang</title>
+  <link rel="stylesheet" href="../assets/site.css">
+</head>
+<body class="article-page">
+  <div class="reading-progress" id="readingProgress" aria-hidden="true"></div>
+
+  <header class="site-header">
+    <a class="wordmark" href="../" aria-label="Dale Yang home">DY<span>.</span></a>
+    <nav aria-label="Primary">
+      <a href="../sections/git.html">Git 学习与实践</a>
+      <a href="https://github.com/yjd953">GitHub</a>
+    </nav>
+  </header>
+
+  <main class="article-layout">
+    <header class="article-masthead">
+      <a class="back-link" href="../sections/git.html">← Git 学习与实践</a>
+      <p class="kicker">04.09 / Remotes / ZH</p>
+      <h1>本地分支和远端分支究竟是什么关系？</h1>
+      <p class="article-deck">区分远端仓库、远端跟踪引用和本地分支，解释 fetch、pull、push 与 force-with-lease。</p>
+    </header>
+
+    <article class="prose">
+      <p>Git 是分布式版本控制系统。本地仓库拥有自己的：</p>
+<ul>
+<li>对象数据库；</li>
+<li>分支；</li>
+<li>标签；</li>
+<li>HEAD；</li>
+<li>Reflog；</li>
+<li>配置。</li>
+</ul>
+<p>远端仓库是另一个独立 Git 仓库，不是本地目录的实时镜像。</p>
+<p>理解远端协作，需要区分三种名字：</p>
+<pre><code class="language-text">main          本地分支
+origin/main   本地保存的远端跟踪引用
+远端 main      服务器仓库中的真实引用
+</code></pre>
+<p>它们可能指向三个不同提交。</p>
+<h2 id="section-remote-只是一个命名连接配置">Remote 只是一个命名连接配置</h2>
+<p>查看：</p>
+<pre><code class="language-bash">git remote -v
+</code></pre>
+<p>可能得到：</p>
+<pre><code class="language-text">origin  git@github.com:yjd953/yjd953.git (fetch)
+origin  git@github.com:yjd953/yjd953.git (push)
+</code></pre>
+<p><code>origin</code> 只是默认名称，不是 Git 保留字。可以叫：</p>
+<pre><code class="language-text">upstream
+company
+github
+backup
+</code></pre>
+<p>查看详细配置：</p>
+<pre><code class="language-bash">git remote show origin
+git config --get-regexp &#39;^remote\.&#39;
+</code></pre>
+<p>添加：</p>
+<pre><code class="language-bash">git remote add upstream https://github.com/example/project.git
+</code></pre>
+<p>修改 URL：</p>
+<pre><code class="language-bash">git remote set-url origin &lt;new-url&gt;
+</code></pre>
+<h2 id="section-originmain-位于本地"><code>origin/main</code> 位于本地</h2>
+<p>执行 Clone 或 Fetch 后，本地会保存：</p>
+<pre><code class="language-text">refs/remotes/origin/main
+</code></pre>
+<p>它表示：</p>
+<blockquote>
+<p>最近一次成功与 origin 通信时，本地观察到远端 main 位于这里。</p>
+</blockquote>
+<p>它不是实时查询结果。</p>
+<p>假设本地：</p>
+<pre><code class="language-text">main ─────────► C
+origin/main ──► C
+</code></pre>
+<p>同事向远端推了 D：</p>
+<pre><code class="language-text">服务器 main ─► D
+本地 origin/main 仍然 ─► C
+</code></pre>
+<p>在你 Fetch 前，本地不知道 D。</p>
+<p>执行：</p>
+<pre><code class="language-bash">git fetch origin
+</code></pre>
+<p>后：</p>
+<pre><code class="language-text">服务器 main ───────► D
+本地 origin/main ──► D
+本地 main ─────────► C
+</code></pre>
+<p>Fetch 通常不自动移动本地 main，也不改工作区。</p>
+<h2 id="section-fetch-做了什么">Fetch 做了什么</h2>
+<pre><code class="language-bash">git fetch origin
+</code></pre>
+<p>主要步骤：</p>
+<ol>
+<li>连接远端；</li>
+<li>交换引用状态；</li>
+<li>协商本地缺少哪些对象；</li>
+<li>下载并校验对象；</li>
+<li>按 Refspec 更新远端跟踪引用；</li>
+<li>记录 <code>FETCH_HEAD</code>。</li>
+</ol>
+<p>查看 Refspec：</p>
+<pre><code class="language-bash">git config --get-all remote.origin.fetch
+</code></pre>
+<p>常见值：</p>
+<pre><code class="language-text">+refs/heads/*:refs/remotes/origin/*
+</code></pre>
+<p>含义是把远端所有分支映射到本地 <code>refs/remotes/origin/*</code>。</p>
+<p>删除本地已不存在的远端跟踪引用：</p>
+<pre><code class="language-bash">git fetch --prune origin
+</code></pre>
+<p>这只删除本地过期的 <code>origin/xxx</code>，不是删除服务器分支。</p>
+<h2 id="section-pull-不是基础动作而是组合动作">Pull 不是基础动作，而是组合动作</h2>
+<pre><code class="language-bash">git pull
+</code></pre>
+<p>通常相当于：</p>
+<pre><code class="language-text">git fetch
++
+git merge 或 git rebase
+</code></pre>
+<p>具体策略由配置和参数决定：</p>
+<pre><code class="language-bash">git pull --ff-only
+git pull --rebase
+git pull --no-rebase
+</code></pre>
+<p>推荐先理解并明确策略。对初学者，稳健方式是拆开：</p>
+<pre><code class="language-bash">git fetch origin
+git log --graph --oneline --decorate --all
+git merge --ff-only origin/main
+</code></pre>
+<p>如果不能 Fast-forward，再有意识地决定 Merge 或 Rebase。</p>
+<p>配置示例：</p>
+<pre><code class="language-bash">git config pull.ff only
+</code></pre>
+<p>这里只修改当前仓库；是否使用应结合团队规范。不要在不了解公司仓库流程时贸然修改全局配置。</p>
+<h2 id="section-upstream本地分支默认跟踪谁">Upstream：本地分支默认跟踪谁</h2>
+<p>查看：</p>
+<pre><code class="language-bash">git branch -vv
+</code></pre>
+<p>示例：</p>
+<pre><code class="language-text">* main 2803068 [origin/main] Initial public snapshot
+</code></pre>
+<p>表示本地 main 的 Upstream 是 <code>origin/main</code>。</p>
+<p>首次推送并建立关系：</p>
+<pre><code class="language-bash">git push -u origin feature/git-notes
+</code></pre>
+<p>以后可以简写：</p>
+<pre><code class="language-bash">git push
+git pull
+</code></pre>
+<p>查看配置：</p>
+<pre><code class="language-bash">git config --get branch.main.remote
+git config --get branch.main.merge
+</code></pre>
+<p>设置：</p>
+<pre><code class="language-bash">git branch --set-upstream-to=origin/main main
+</code></pre>
+<p>Upstream 只是一组默认比较和推拉关系，不会自动同步。</p>
+<h2 id="section-ahead-和-behind-是怎样计算的">Ahead 和 Behind 是怎样计算的</h2>
+<p>执行：</p>
+<pre><code class="language-bash">git status --short --branch
+</code></pre>
+<p>可能显示：</p>
+<pre><code class="language-text">## main...origin/main [ahead 2, behind 1]
+</code></pre>
+<p>含义：</p>
+<ul>
+<li>有 2 个提交从本地 main 可达，但从 origin/main 不可达；</li>
+<li>有 1 个提交从 origin/main 可达，但从本地 main 不可达。</li>
+</ul>
+<p>它比较的是提交图可达集合，不是文件行数。</p>
+<p>查看：</p>
+<pre><code class="language-bash">git log --left-right --oneline main...origin/main
+</code></pre>
+<p>统计：</p>
+<pre><code class="language-bash">git rev-list --left-right --count main...origin/main
+</code></pre>
+<p>注意结果只基于当前本地的 <code>origin/main</code>。想知道服务器最新状态，先 Fetch。</p>
+<h2 id="section-push-做了什么">Push 做了什么</h2>
+<pre><code class="language-bash">git push origin main
+</code></pre>
+<p>概念上：</p>
+<pre><code class="language-text">本地 refs/heads/main
+        │
+        └── 请求更新远端 refs/heads/main
+</code></pre>
+<p>Git 会：</p>
+<ol>
+<li>连接远端并认证；</li>
+<li>读取远端引用；</li>
+<li>计算远端缺少的对象；</li>
+<li>打包并传输；</li>
+<li>请求远端更新引用；</li>
+<li>远端执行权限、Hook、分支保护检查；</li>
+<li>成功后本地更新相关跟踪信息。</li>
+</ol>
+<p>Push 不等于“上传当前工作区”。未提交修改没有 Commit 和 Tree，不会被 Push。</p>
+<h2 id="section-为什么普通-push-会拒绝-non-fast-forward">为什么普通 Push 会拒绝 Non-fast-forward</h2>
+<p>远端：</p>
+<pre><code class="language-text">A ← B ← C  remote main
+</code></pre>
+<p>本地：</p>
+<pre><code class="language-text">A ← B ← D  local main
+</code></pre>
+<p>如果把远端 main 直接从 C 改到 D，C 将不再由 main 到达。这不是 Fast-forward。</p>
+<p>普通 Push 拒绝：</p>
+<pre><code class="language-text">non-fast-forward
+</code></pre>
+<p>因为它可能覆盖别人工作。</p>
+<p>先：</p>
+<pre><code class="language-bash">git fetch origin
+git log --graph --oneline --decorate --all
+</code></pre>
+<p>再选择：</p>
+<pre><code class="language-bash">git merge origin/main
+# 或
+git rebase origin/main
+</code></pre>
+<p>完成验证后普通 Push。</p>
+<h2 id="section-force-与-force-with-lease"><code>--force</code> 与 <code>--force-with-lease</code></h2>
+<p><code>--force</code> 表示即使不是 Fast-forward，也请求更新：</p>
+<pre><code class="language-bash">git push --force origin main
+</code></pre>
+<p>它可能覆盖你尚未 Fetch 到的远端新提交。</p>
+<p><code>--force-with-lease</code> 增加期望值检查：</p>
+<pre><code class="language-bash">git push --force-with-lease origin feature
+</code></pre>
+<p>大意是：</p>
+<blockquote>
+<p>只有远端 feature 仍位于我预期的旧 Commit，才更新到新 Commit。</p>
+</blockquote>
+<p>更明确地指定期望：</p>
+<pre><code class="language-bash">git push \
+  --force-with-lease=refs/heads/feature:&lt;expected-old-id&gt; \
+  origin feature
+</code></pre>
+<p>它仍然是历史改写，不会自动解决协作影响，只是降低误覆盖风险。</p>
+<h2 id="section-删除远端分支">删除远端分支</h2>
+<pre><code class="language-bash">git push origin --delete feature/old
+</code></pre>
+<p>这会请求远端删除引用。</p>
+<p>本地还可能存在：</p>
+<pre><code class="language-text">feature/old          本地分支
+origin/feature/old   远端跟踪引用
+</code></pre>
+<p>Fetch 并 Prune：</p>
+<pre><code class="language-bash">git fetch --prune origin
+</code></pre>
+<p>再按需要删除本地分支：</p>
+<pre><code class="language-bash">git branch -d feature/old
+</code></pre>
+<p>三个动作不是同一件事。</p>
+<h2 id="section-tag-默认不会随普通-push-自动全部上传">Tag 默认不会随普通 Push 自动全部上传</h2>
+<p>创建：</p>
+<pre><code class="language-bash">git tag -a v1.0.0 -m &quot;release 1.0.0&quot;
+</code></pre>
+<p>推送一个：</p>
+<pre><code class="language-bash">git push origin v1.0.0
+</code></pre>
+<p>推送所有本地标签：</p>
+<pre><code class="language-bash">git push origin --tags
+</code></pre>
+<p>删除远端标签：</p>
+<pre><code class="language-bash">git push origin :refs/tags/v1.0.0
+</code></pre>
+<p>发布标签通常不应随意改写，因为构建、制品和外部依赖可能已经绑定该版本。</p>
+<h2 id="section-fork-工作流中的-origin-与-upstream">Fork 工作流中的 <code>origin</code> 与 <code>upstream</code></h2>
+<p>常见配置：</p>
+<pre><code class="language-text">origin    → 自己的 Fork
+upstream  → 原始项目
+</code></pre>
+<p>更新：</p>
+<pre><code class="language-bash">git fetch upstream
+git switch main
+git merge --ff-only upstream/main
+git push origin main
+</code></pre>
+<p>功能分支：</p>
+<pre><code class="language-bash">git switch -c feature/x upstream/main
+git push -u origin feature/x
+</code></pre>
+<p>Pull Request 从自己的 Fork 分支指向上游主干。</p>
+<h2 id="section-协议与认证">协议与认证</h2>
+<p>常见 URL：</p>
+<pre><code class="language-text">https://github.com/org/repo.git
+git@github.com:org/repo.git
+</code></pre>
+<p>HTTPS 通常使用：</p>
+<ul>
+<li>Credential Manager；</li>
+<li>Personal Access Token；</li>
+<li>平台登录集成。</li>
+</ul>
+<p>SSH 通常使用：</p>
+<ul>
+<li>私钥保存在本机；</li>
+<li>公钥注册到平台；</li>
+<li>SSH Agent 管理解锁状态。</li>
+</ul>
+<p>测试：</p>
+<pre><code class="language-bash">ssh -T git@github.com
+</code></pre>
+<p>不要把：</p>
+<ul>
+<li>Token；</li>
+<li>私钥；</li>
+<li>带凭证 URL；</li>
+<li>Credential 文件；</li>
+</ul>
+<p>提交到仓库。</p>
+<h2 id="section-一次安全同步流程">一次安全同步流程</h2>
+<pre><code class="language-bash"># 1. 确认本地状态
+git status --short --branch
+
+# 2. 只获取，不自动合并
+git fetch --prune origin
+
+# 3. 查看图
+git log --graph --oneline --decorate --all -30
+
+# 4. 比较双方
+git log --left-right --oneline HEAD...origin/main
+
+# 5. 明确选择策略
+git merge --ff-only origin/main
+# 如果无法快进，再判断 merge 或 rebase
+
+# 6. 验证
+git status
+&lt;运行测试&gt;
+
+# 7. 推送
+git push
+</code></pre>
+<p>这比盲目 <code>git pull</code> 更容易理解每一步发生了什么。</p>
+<h2 id="section-历史强推后的本地覆盖">历史强推后的本地覆盖</h2>
+<p>如果远端经过协调后重建为新历史：</p>
+<pre><code class="language-text">本地 main   → old-history
+远端 main   → new-root
+</code></pre>
+<p>先确认工作区没有要保留的修改，再：</p>
+<pre><code class="language-bash">git fetch origin --prune
+git log --graph --oneline --decorate --all
+git reset --hard origin/main
+</code></pre>
+<p>如果本地旧 Reflog 和对象也需要清理：</p>
+<pre><code class="language-bash">git reflog expire --expire=now --expire-unreachable=now --all
+git gc --prune=now
+</code></pre>
+<p>后两条会降低旧提交的本地恢复可能，只应在确认新历史正确且不再需要旧对象后执行。它们不影响其他 Clone、Fork 或平台缓存。</p>
+<h2 id="section-最小远端实验">最小远端实验</h2>
+<p>可以用本地 Bare Repository 模拟服务器：</p>
+<pre><code class="language-bash">mkdir remote-lab
+cd remote-lab
+git init --bare server.git
+git clone server.git alice
+git clone server.git bob
+</code></pre>
+<p>Alice：</p>
+<pre><code class="language-bash">cd alice
+printf &quot;alice\n&quot; &gt; demo.txt
+git add demo.txt
+git commit -m &quot;alice change&quot;
+git push origin main
+</code></pre>
+<p>Bob 在 Fetch 前：</p>
+<pre><code class="language-bash">cd ../bob
+git log --all --oneline
+</code></pre>
+<p>然后：</p>
+<pre><code class="language-bash">git fetch origin
+git log --all --graph --oneline --decorate
+</code></pre>
+<p>这个实验会直接证明：远端已经变化，不代表本地 <code>origin/main</code> 会自动变化；只有通信后，本地才更新对远端状态的认知。</p>
+
+    </article>
+  </main>
+
+  <footer class="site-footer article-footer">
+    <a href="../sections/git.html">Git 学习与实践 / 分支与协作</a>
+    <a href="https://github.com/yjd953/yjd953/blob/main/posts/git-remotes.md">View source ↗</a>
+  </footer>
+  <script src="../assets/site.js" defer></script>
+</body>
+</html>

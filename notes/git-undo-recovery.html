@@ -1,0 +1,424 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="按未暂存、已暂存、已提交、已推送四种状态选择撤销方式，并用 Reflog 兜底。">
+  <meta name="theme-color" content="#f1f1ee">
+  <title>写错以后，restore、reset、revert 应该选哪个？ — Dale Yang</title>
+  <link rel="stylesheet" href="../assets/site.css">
+</head>
+<body class="article-page">
+  <div class="reading-progress" id="readingProgress" aria-hidden="true"></div>
+
+  <header class="site-header">
+    <a class="wordmark" href="../" aria-label="Dale Yang home">DY<span>.</span></a>
+    <nav aria-label="Primary">
+      <a href="../sections/git.html">Git 学习与实践</a>
+      <a href="https://github.com/yjd953">GitHub</a>
+    </nav>
+  </header>
+
+  <main class="article-layout">
+    <header class="article-masthead">
+      <a class="back-link" href="../sections/git.html">← Git 学习与实践</a>
+      <p class="kicker">04.06 / Undo and recovery / ZH</p>
+      <h1>写错以后，restore、reset、revert 应该选哪个？</h1>
+      <p class="article-deck">按未暂存、已暂存、已提交、已推送四种状态选择撤销方式，并用 Reflog 兜底。</p>
+    </header>
+
+    <article class="prose">
+      <p>Git 撤销最危险的地方不是命令多，而是同一个“撤销”可能指四种不同目标：</p>
+<ol>
+<li>丢弃工作区修改；</li>
+<li>取消暂存但保留文件内容；</li>
+<li>移动本地分支到旧提交；</li>
+<li>在公共历史上创建一个反向提交。</li>
+</ol>
+<p>选择命令前，先问两个问题：</p>
+<pre><code class="language-text">改动现在位于工作区、暂存区还是提交历史？
+这个历史是否已经推送并被别人使用？
+</code></pre>
+<h2 id="section-一张选择表">一张选择表</h2>
+<div class="table-scroll"><table>
+<thead>
+<tr>
+<th>当前状态</th>
+<th>目标</th>
+<th>常用命令</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>工作区未暂存</td>
+<td>丢弃修改</td>
+<td><code>git restore &lt;file&gt;</code></td>
+</tr>
+<tr>
+<td>已暂存</td>
+<td>取消暂存、保留内容</td>
+<td><code>git restore --staged &lt;file&gt;</code></td>
+</tr>
+<tr>
+<td>最后一次本地提交</td>
+<td>补文件或改说明</td>
+<td><code>git commit --amend</code></td>
+</tr>
+<tr>
+<td>多个未共享提交</td>
+<td>重排、合并、修改</td>
+<td><code>git rebase -i</code></td>
+</tr>
+<tr>
+<td>本地分支走错</td>
+<td>移动分支</td>
+<td><code>git reset</code></td>
+</tr>
+<tr>
+<td>已共享提交</td>
+<td>安全撤销效果</td>
+<td><code>git revert</code></td>
+</tr>
+<tr>
+<td>误删提交/分支</td>
+<td>找旧引用</td>
+<td><code>git reflog</code></td>
+</tr>
+</tbody></table></div>
+<p>任何可能丢失内容的操作前，先运行：</p>
+<pre><code class="language-bash">git status --short --branch
+git diff
+git diff --staged
+</code></pre>
+<p>重要修改可以先创建临时分支：</p>
+<pre><code class="language-bash">git branch backup-before-recovery
+</code></pre>
+<h2 id="section-restore恢复工作区或暂存区内容"><code>restore</code>：恢复工作区或暂存区内容</h2>
+<p>丢弃某文件未暂存修改：</p>
+<pre><code class="language-bash">git restore path/to/file
+</code></pre>
+<p>默认来源是暂存区。它让工作区文件匹配 Index。</p>
+<p>这会丢失尚未提交的修改，执行前先看：</p>
+<pre><code class="language-bash">git diff -- path/to/file
+</code></pre>
+<p>取消暂存但保留工作区：</p>
+<pre><code class="language-bash">git restore --staged path/to/file
+</code></pre>
+<p>状态变化：</p>
+<pre><code class="language-text">执行前：
+HEAD      = v1
+Index     = v2
+Worktree  = v2
+
+执行后：
+HEAD      = v1
+Index     = v1
+Worktree  = v2
+</code></pre>
+<p>从指定提交恢复文件到工作区：</p>
+<pre><code class="language-bash">git restore --source=&lt;commit&gt; -- path/to/file
+</code></pre>
+<p>同时写入暂存区和工作区：</p>
+<pre><code class="language-bash">git restore --source=&lt;commit&gt; --staged --worktree -- path/to/file
+</code></pre>
+<p>这不是移动分支，只是恢复路径内容。</p>
+<h2 id="section-reset移动当前分支并可同步-index-和工作区"><code>reset</code>：移动当前分支，并可同步 Index 和工作区</h2>
+<p><code>reset</code> 的核心动作是：</p>
+<blockquote>
+<p>把当前分支引用移动到指定 Commit。</p>
+</blockquote>
+<p>三种模式决定还要更新什么。</p>
+<h3 id="section-soft只移动分支"><code>--soft</code>：只移动分支</h3>
+<pre><code class="language-bash">git reset --soft HEAD~1
+</code></pre>
+<p>状态：</p>
+<pre><code class="language-text">分支：移动到父提交
+Index：保留原提交内容
+工作区：保留原提交内容
+</code></pre>
+<p>结果是“最后一个提交被拆回暂存状态”。</p>
+<p>适合：</p>
+<ul>
+<li>合并几个尚未共享的提交；</li>
+<li>重写最后一次提交说明；</li>
+<li>重新组织提交边界。</li>
+</ul>
+<h3 id="section-mixed移动分支并重置暂存区"><code>--mixed</code>：移动分支并重置暂存区</h3>
+<pre><code class="language-bash">git reset HEAD~1
+</code></pre>
+<p><code>--mixed</code> 是默认模式：</p>
+<pre><code class="language-text">分支：移动到父提交
+Index：匹配目标提交
+工作区：保留
+</code></pre>
+<p>最后一个提交变成工作区未暂存修改。</p>
+<p>适合重新选择 <code>git add -p</code>。</p>
+<h3 id="section-hard分支暂存区工作区一起重置"><code>--hard</code>：分支、暂存区、工作区一起重置</h3>
+<pre><code class="language-bash">git reset --hard HEAD~1
+</code></pre>
+<pre><code class="language-text">分支：移动
+Index：匹配目标
+工作区：匹配目标
+</code></pre>
+<p>未提交内容会被覆盖。它是高风险命令，但并非不能使用。安全前提是：</p>
+<ul>
+<li>已确认工作区没有需要保留的修改；</li>
+<li>已记录目标 Commit；</li>
+<li>已了解公共历史影响；</li>
+<li>最好有备份分支或远端副本。</li>
+</ul>
+<h2 id="section-reset-file-与-reset-commit-为什么容易混淆"><code>reset &lt;file&gt;</code> 与 <code>reset &lt;commit&gt;</code> 为什么容易混淆</h2>
+<p>传统命令：</p>
+<pre><code class="language-bash">git reset path/to/file
+</code></pre>
+<p>不会移动分支，而是把该路径从 HEAD 恢复到暂存区，效果接近：</p>
+<pre><code class="language-bash">git restore --staged path/to/file
+</code></pre>
+<p>加了路径以后，语义从“移动分支”变成“更新 Index 路径”，这也是旧 Git 用户容易误操作的原因。现代命令优先用 <code>restore</code> 表达文件恢复，用 <code>reset</code> 表达引用移动。</p>
+<h2 id="section-revert在公共历史上创建反向提交"><code>revert</code>：在公共历史上创建反向提交</h2>
+<p>假设：</p>
+<pre><code class="language-text">A ← B ← C
+        引入错误
+</code></pre>
+<p>执行：</p>
+<pre><code class="language-bash">git revert B
+</code></pre>
+<p>会创建新提交 D：</p>
+<pre><code class="language-text">A ← B ← C ← D
+            撤销 B 的效果
+</code></pre>
+<p>B 仍在历史里，因此：</p>
+<ul>
+<li>Commit ID 不变；</li>
+<li>其他协作者无需重置；</li>
+<li>审计记录完整；</li>
+<li>Push 通常是 Fast-forward。</li>
+</ul>
+<p>这适合已经推送的公共分支。</p>
+<p>Revert 不是“删除 B”，而是尝试应用 B 的逆 Patch。如果 C 又修改了相同位置，可能产生冲突。</p>
+<p>撤销合并提交时需要指定主线父节点：</p>
+<pre><code class="language-bash">git revert -m 1 &lt;merge-commit&gt;
+</code></pre>
+<p>这里的 <code>-m 1</code> 不是 Message，而是 Mainline Parent。执行前必须确认哪个父节点代表要保留的主线。</p>
+<h2 id="section-amend替换最后一个提交"><code>amend</code>：替换最后一个提交</h2>
+<p>补上漏掉的文件：</p>
+<pre><code class="language-bash">git add missing-file
+git commit --amend --no-edit
+</code></pre>
+<p>修改提交说明：</p>
+<pre><code class="language-bash">git commit --amend
+</code></pre>
+<p>Amend 创建新 Commit：</p>
+<pre><code class="language-text">A ← B        旧
+A ← B&#39;       新
+</code></pre>
+<p>如果 B 尚未 Push，通常安全。</p>
+<p>如果 B 已经共享，需要强推才能让远端改成 B&#39;，并可能影响协作者。因此公共分支更倾向于新增修复提交。</p>
+<h2 id="section-interactive-rebase整理未共享提交">Interactive Rebase：整理未共享提交</h2>
+<pre><code class="language-bash">git rebase -i HEAD~4
+</code></pre>
+<p>编辑列表：</p>
+<pre><code class="language-text">pick a1 first change
+reword b2 unclear message
+squash c3 tiny follow-up
+edit d4 wrong author
+</code></pre>
+<p>常见动作：</p>
+<div class="table-scroll"><table>
+<thead>
+<tr>
+<th>动作</th>
+<th>作用</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>pick</code></td>
+<td>保留提交</td>
+</tr>
+<tr>
+<td><code>reword</code></td>
+<td>修改说明</td>
+</tr>
+<tr>
+<td><code>edit</code></td>
+<td>暂停以修改内容或身份</td>
+</tr>
+<tr>
+<td><code>squash</code></td>
+<td>合并到前一个提交并编辑说明</td>
+</tr>
+<tr>
+<td><code>fixup</code></td>
+<td>合并并丢弃当前说明</td>
+</tr>
+<tr>
+<td><code>drop</code></td>
+<td>删除提交</td>
+</tr>
+</tbody></table></div>
+<p>Rebase 会重新创建目标提交和后续提交，因此 ID 全部改变。</p>
+<p>规则：</p>
+<blockquote>
+<p>优先整理自己的未共享历史，不要随意改写团队已经基于其开发的公共历史。</p>
+</blockquote>
+<h2 id="section-reflog引用走错后的第一恢复入口">Reflog：引用走错后的第一恢复入口</h2>
+<p>误执行：</p>
+<pre><code class="language-bash">git reset --hard HEAD~3
+</code></pre>
+<p>先不要继续大量操作。查看：</p>
+<pre><code class="language-bash">git reflog --date=iso
+</code></pre>
+<p>可能看到：</p>
+<pre><code class="language-text">111aaaa HEAD@{0}: reset: moving to HEAD~3
+444dddd HEAD@{1}: commit: important work
+</code></pre>
+<p>先建立救援分支：</p>
+<pre><code class="language-bash">git branch rescue 444dddd
+</code></pre>
+<p>再决定如何恢复：</p>
+<pre><code class="language-bash">git reset --hard rescue
+</code></pre>
+<p>使用救援分支比直接再次 Reset 更稳，因为它先给旧提交创建一个持久引用。</p>
+<p>常见恢复：</p>
+<pre><code class="language-bash"># 误删分支
+git reflog
+git branch recovered &lt;old-tip&gt;
+
+# Rebase 结果错误
+git reflog
+git branch before-rebase &lt;old-head&gt;
+
+# Amend 后想回旧提交
+git reflog
+git show HEAD@{1}
+</code></pre>
+<h2 id="section-未提交文件一定能恢复吗">未提交文件一定能恢复吗</h2>
+<p>不一定。</p>
+<p>如果修改从未被：</p>
+<ul>
+<li><code>git add</code> 写成 Blob；</li>
+<li>Commit；</li>
+<li>Stash；</li>
+<li>IDE Local History 保存；</li>
+<li>系统快照或备份保存；</li>
+</ul>
+<p>那么 Git 可能从未拥有这份内容。<code>git restore</code> 或 <code>reset --hard</code> 覆盖后，Git Reflog 也无法凭空恢复。</p>
+<p>如果曾执行 <code>git add</code>，即使没有 Commit，Blob 可能暂时存在为不可达对象。可以尝试：</p>
+<pre><code class="language-bash">git fsck --lost-found
+</code></pre>
+<p>再检查 Dangling Blob：</p>
+<pre><code class="language-bash">git cat-file -p &lt;blob-id&gt;
+</code></pre>
+<p>但这不是可靠工作流：</p>
+<ul>
+<li>文件名不会保存在 Blob 中；</li>
+<li>Blob 可能很多；</li>
+<li>垃圾回收可能删除；</li>
+<li>不能保证内容曾写入对象库。</li>
+</ul>
+<p>重要工作应及时提交到临时分支，而不是依赖对象打捞。</p>
+<h2 id="section-stash-的恢复">Stash 的恢复</h2>
+<p>查看：</p>
+<pre><code class="language-bash">git stash list
+git stash show -p stash@{0}
+</code></pre>
+<p>应用但保留 Stash：</p>
+<pre><code class="language-bash">git stash apply stash@{0}
+</code></pre>
+<p>应用并删除：</p>
+<pre><code class="language-bash">git stash pop
+</code></pre>
+<p>如果 Stash 对当前分支冲突，可以从保存时的基线创建分支：</p>
+<pre><code class="language-bash">git stash branch recover-work stash@{0}
+</code></pre>
+<p>这通常比在变化很大的当前分支上直接 Pop 更容易解决。</p>
+<h2 id="section-已经-push-后应该怎样撤销">已经 Push 后应该怎样撤销</h2>
+<p>公共主干上：</p>
+<pre><code class="language-bash">git revert &lt;bad-commit&gt;
+git push
+</code></pre>
+<p>通常是默认选择。</p>
+<p>只有以下情况才考虑改写远端：</p>
+<ul>
+<li>敏感密钥或个人信息必须移除；</li>
+<li>错误大文件导致仓库严重膨胀；</li>
+<li>团队明确同意重建历史；</li>
+<li>分支是个人临时分支，没有其他使用者。</li>
+</ul>
+<p>需要强推时优先：</p>
+<pre><code class="language-bash">git push --force-with-lease
+</code></pre>
+<p>而不是：</p>
+<pre><code class="language-bash">git push --force
+</code></pre>
+<p><code>--force-with-lease</code> 会验证远端仍是你最后 Fetch 时看到的状态。如果别人刚推了新提交，它通常会拒绝覆盖。</p>
+<h2 id="section-一套事故处理流程">一套事故处理流程</h2>
+<p>发生误操作时：</p>
+<h3 id="section-1-停止继续写入">1. 停止继续写入</h3>
+<p>不要马上：</p>
+<ul>
+<li>再次 Reset；</li>
+<li>随意 Rebase；</li>
+<li>运行 GC；</li>
+<li>删除 <code>.git</code>；</li>
+<li>重新 Clone 覆盖现场。</li>
+</ul>
+<h3 id="section-2-收集状态">2. 收集状态</h3>
+<pre><code class="language-bash">git status --short --branch
+git log --graph --oneline --decorate --all -30
+git reflog --date=iso -30
+git branch --all --verbose
+</code></pre>
+<h3 id="section-3-给可能需要的提交建分支">3. 给可能需要的提交建分支</h3>
+<pre><code class="language-bash">git branch rescue/&lt;name&gt; &lt;commit&gt;
+</code></pre>
+<h3 id="section-4-再选择恢复工具">4. 再选择恢复工具</h3>
+<ul>
+<li>文件内容：<code>restore</code>；</li>
+<li>暂存状态：<code>restore --staged</code>；</li>
+<li>本地引用：<code>reset</code>；</li>
+<li>公共历史：<code>revert</code>；</li>
+<li>丢失引用：<code>reflog</code>；</li>
+<li>未提交 Blob：<code>fsck</code>，仅作为最后尝试。</li>
+</ul>
+<h3 id="section-5-验证">5. 验证</h3>
+<pre><code class="language-bash">git status
+git diff
+git diff --staged
+git log --graph --oneline --decorate --all
+</code></pre>
+<h2 id="section-四个练习">四个练习</h2>
+<h3 id="section-练习-1取消暂存">练习 1：取消暂存</h3>
+<pre><code class="language-bash">printf &quot;change\n&quot; &gt;&gt; demo.txt
+git add demo.txt
+git restore --staged demo.txt
+</code></pre>
+<p>确认文件内容仍在，但状态变为未暂存。</p>
+<h3 id="section-练习-2拆回最后一次提交">练习 2：拆回最后一次提交</h3>
+<pre><code class="language-bash">git reset --soft HEAD~1
+</code></pre>
+<p>观察分支、Index 和工作区。</p>
+<h3 id="section-练习-3公共撤销">练习 3：公共撤销</h3>
+<pre><code class="language-bash">git revert HEAD
+</code></pre>
+<p>观察历史中同时存在原提交和 Revert 提交。</p>
+<h3 id="section-练习-4误-reset-后恢复">练习 4：误 Reset 后恢复</h3>
+<p>先记录：</p>
+<pre><code class="language-bash">git log --oneline -3
+</code></pre>
+<p>在临时仓库执行：</p>
+<pre><code class="language-bash">git reset --hard HEAD~1
+git reflog
+git branch rescue HEAD@{1}
+</code></pre>
+<p>理解恢复成功的原因：旧 Commit 没有被修改，只是原分支引用离开了它；Reflog 暂时保留了旧位置。</p>
+
+    </article>
+  </main>
+
+  <footer class="site-footer article-footer">
+    <a href="../sections/git.html">Git 学习与实践 / 历史与恢复</a>
+    <a href="https://github.com/yjd953/yjd953/blob/main/posts/git-undo-recovery.md">View source ↗</a>
+  </footer>
+  <script src="../assets/site.js" defer></script>
+</body>
+</html>

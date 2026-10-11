@@ -31,6 +31,14 @@ const modules = [
     description:
       "以问题为入口，串联 Java、Go、JVM、Redis、MySQL、网络与分布式系统。",
   },
+  {
+    number: "04",
+    slug: "git",
+    title: "Git 学习与实践",
+    label: "Git learning and practice",
+    description:
+      "从对象数据库和提交图出发，掌握日常操作、分支协作、历史排查、故障恢复与隐私安全。",
+  },
 ];
 
 const notes = [
@@ -505,6 +513,201 @@ const notes = [
     description:
       "Java、Go、JVM、Redis、MySQL、MQ、网络与分布式系统，九个模块、90 个高频知识点。",
   },
+  {
+    number: "01",
+    module: "git",
+    group: "基础模型",
+    slug: "git-mental-model",
+    source: "posts/git-mental-model.md",
+    title: "Git 到底在管理什么？",
+    category: "Mental model",
+    language: "ZH",
+    detail: "三个区域",
+    description:
+      "从工作区、暂存区和本地仓库建立第一张地图，理解一次修改如何进入历史。",
+  },
+  {
+    number: "02",
+    module: "git",
+    group: "基础模型",
+    slug: "git-object-model",
+    source: "posts/git-object-model.md",
+    title: "Git 的对象数据库里到底存了什么？",
+    category: "Object model",
+    language: "ZH",
+    detail: "Blob / Tree / Commit",
+    description:
+      "拆解 Blob、Tree、Commit、Tag 与对象 ID，理解 Git 为什么更像快照数据库。",
+  },
+  {
+    number: "03",
+    module: "git",
+    group: "基础模型",
+    slug: "git-commit-graph",
+    source: "posts/git-commit-graph.md",
+    title: "分支和 HEAD 为什么只是指针？",
+    category: "Commit graph",
+    language: "ZH",
+    detail: "引用与可达性",
+    description:
+      "沿父提交关系建立提交图，解释 Branch、HEAD、Detached HEAD 与可达对象。",
+  },
+  {
+    number: "04",
+    module: "git",
+    group: "基础模型",
+    slug: "git-daily-change-flow",
+    source: "posts/git-daily-change-flow.md",
+    title: "一次代码修改是怎样进入 Git 历史的？",
+    category: "Daily workflow",
+    language: "ZH",
+    detail: "Status / Add / Commit",
+    description:
+      "把 status、diff、add、commit 放进同一条数据流，学会精确控制每次提交。",
+  },
+  {
+    number: "05",
+    module: "git",
+    group: "历史与恢复",
+    slug: "git-inspect-history",
+    source: "posts/git-inspect-history.md",
+    title: "Git 是怎样还原每次代码变化的？",
+    category: "History inspection",
+    language: "ZH",
+    detail: "Log / Show / Blame",
+    description:
+      "用 log、show、diff、blame 和文件历史追踪提交、代码行与变更来源。",
+  },
+  {
+    number: "06",
+    module: "git",
+    group: "历史与恢复",
+    slug: "git-undo-recovery",
+    source: "posts/git-undo-recovery.md",
+    title: "写错以后，restore、reset、revert 应该选哪个？",
+    category: "Undo and recovery",
+    language: "ZH",
+    detail: "按状态选择",
+    description:
+      "按未暂存、已暂存、已提交、已推送四种状态选择撤销方式，并用 Reflog 兜底。",
+  },
+  {
+    number: "07",
+    module: "git",
+    group: "分支与协作",
+    slug: "git-branch-merge",
+    source: "posts/git-branch-merge.md",
+    title: "分支、合并与冲突到底发生了什么？",
+    category: "Branch and merge",
+    language: "ZH",
+    detail: "三方合并",
+    description:
+      "从共同祖先解释 Fast-forward、Merge Commit、三方合并与冲突解决。",
+  },
+  {
+    number: "08",
+    module: "git",
+    group: "分支与协作",
+    slug: "git-rebase-cherry-pick",
+    source: "posts/git-rebase-cherry-pick.md",
+    title: "Rebase 和 Cherry-pick 为什么会改写提交？",
+    category: "History editing",
+    language: "ZH",
+    detail: "复制提交",
+    description:
+      "理解 Rebase 与 Cherry-pick 的本质是重新应用补丁，并掌握安全使用边界。",
+  },
+  {
+    number: "09",
+    module: "git",
+    group: "分支与协作",
+    slug: "git-remotes",
+    source: "posts/git-remotes.md",
+    title: "本地分支和远端分支究竟是什么关系？",
+    category: "Remotes",
+    language: "ZH",
+    detail: "Fetch / Pull / Push",
+    description:
+      "区分远端仓库、远端跟踪引用和本地分支，解释 fetch、pull、push 与 force-with-lease。",
+  },
+  {
+    number: "10",
+    module: "git",
+    group: "分支与协作",
+    slug: "git-collaboration-workflow",
+    source: "posts/git-collaboration-workflow.md",
+    title: "一个可维护的 Git 协作流程应该怎样设计？",
+    category: "Collaboration",
+    language: "ZH",
+    detail: "Branch / PR / Review",
+    description:
+      "从任务分支、提交粒度、Pull Request、Review 到合并策略设计团队工作流。",
+  },
+  {
+    number: "11",
+    module: "git",
+    group: "进阶工具",
+    slug: "git-stash-worktree-tags",
+    source: "posts/git-stash-worktree-tags.md",
+    title: "Stash、Worktree 和 Tag 分别解决什么问题？",
+    category: "Advanced tools",
+    language: "ZH",
+    detail: "临时状态与发布点",
+    description:
+      "管理临时修改、并行工作目录和稳定发布标记，避免把不同任务混在一起。",
+  },
+  {
+    number: "12",
+    module: "git",
+    group: "进阶工具",
+    slug: "git-bisect-debugging",
+    source: "posts/git-bisect-debugging.md",
+    title: "怎样用 Git Bisect 定位引入 Bug 的提交？",
+    category: "Debugging",
+    language: "ZH",
+    detail: "二分排查",
+    description:
+      "把好提交和坏提交交给 Git，通过二分搜索和自动化测试定位回归来源。",
+  },
+  {
+    number: "13",
+    module: "git",
+    group: "工程治理",
+    slug: "git-repository-hygiene",
+    source: "posts/git-repository-hygiene.md",
+    title: "怎样保持一个 Git 仓库长期干净？",
+    category: "Repository hygiene",
+    language: "ZH",
+    detail: "Ignore / Attributes / LFS",
+    description:
+      "处理忽略规则、换行、二进制文件、大文件、生成物和提交前检查。",
+  },
+  {
+    number: "14",
+    module: "git",
+    group: "工程治理",
+    slug: "git-identity-privacy",
+    source: "posts/git-identity-privacy.md",
+    title: "Git 提交身份、邮箱与签名是怎样工作的？",
+    category: "Identity and privacy",
+    language: "ZH",
+    detail: "Author / Committer",
+    description:
+      "区分 Author 与 Committer，理解邮箱暴露、仓库级身份、Noreply 邮箱和签名验证。",
+  },
+  {
+    number: "15",
+    module: "git",
+    group: "工程治理",
+    slug: "git-history-rewrite",
+    source: "posts/git-history-rewrite.md",
+    title: "怎样安全地改写历史并清除敏感信息？",
+    category: "History rewrite",
+    language: "ZH",
+    detail: "Rewrite / Cleanup",
+    description:
+      "从对象可达性出发，处理错误邮箱、密钥、大文件和整仓历史重建，并验证清理结果。",
+  },
 ];
 
 marked.setOptions({
@@ -621,8 +824,8 @@ function renderIndex() {
       <p class="kicker">Dale Yang / Agent engineer</p>
       <h1>Engineering<br>notes<span>.</span></h1>
       <p class="intro-copy">
-        从 Agent 如何行动，到程序如何运行，再到后端系统如何落地。
-        三条路径，持续向底层追问。
+        从 Agent 如何行动，到程序如何运行，再到后端系统与 Git 协作如何落地。
+        四条路径，持续向底层追问。
       </p>
     </section>
 
@@ -652,7 +855,7 @@ function renderIndex() {
   return documentShell({
     title: "Dale Yang — Engineering Paths",
     description:
-      "Deep notes on Agent systems, computer systems, and backend engineering.",
+      "Deep notes on Agent systems, computer systems, backend engineering, and Git.",
     body,
     bodyClass: "index-page",
     lang: "zh-CN",

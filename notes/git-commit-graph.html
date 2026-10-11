@@ -1,0 +1,429 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="沿父提交关系建立提交图，解释 Branch、HEAD、Detached HEAD 与可达对象。">
+  <meta name="theme-color" content="#f1f1ee">
+  <title>分支和 HEAD 为什么只是指针？ — Dale Yang</title>
+  <link rel="stylesheet" href="../assets/site.css">
+</head>
+<body class="article-page">
+  <div class="reading-progress" id="readingProgress" aria-hidden="true"></div>
+
+  <header class="site-header">
+    <a class="wordmark" href="../" aria-label="Dale Yang home">DY<span>.</span></a>
+    <nav aria-label="Primary">
+      <a href="../sections/git.html">Git 学习与实践</a>
+      <a href="https://github.com/yjd953">GitHub</a>
+    </nav>
+  </header>
+
+  <main class="article-layout">
+    <header class="article-masthead">
+      <a class="back-link" href="../sections/git.html">← Git 学习与实践</a>
+      <p class="kicker">04.03 / Commit graph / ZH</p>
+      <h1>分支和 HEAD 为什么只是指针？</h1>
+      <p class="article-deck">沿父提交关系建立提交图，解释 Branch、HEAD、Detached HEAD 与可达对象。</p>
+    </header>
+
+    <article class="prose">
+      <p>很多 Git 操作看起来像在搬动大量文件：</p>
+<ul>
+<li>创建分支；</li>
+<li>切换分支；</li>
+<li>合并分支；</li>
+<li>删除分支；</li>
+<li>回退到旧版本。</li>
+</ul>
+<p>但从内部看，其中很多动作只是在移动一个很小的引用文件。</p>
+<p>要理解这一点，需要先把提交看成一张有向无环图：</p>
+<pre><code class="language-text">A ← B ← C ← D
+</code></pre>
+<p>箭头表示“当前提交记录了父提交”。<code>D</code> 指向 <code>C</code>，<code>C</code> 指向 <code>B</code>。历史方向从新提交沿 Parent 回到过去。</p>
+<p>分支则是某个提交的可移动名字：</p>
+<pre><code class="language-text">main ──► D
+</code></pre>
+<h2 id="section-为什么提交历史是一张图">为什么提交历史是一张图</h2>
+<p>普通提交只有一个父节点：</p>
+<pre><code class="language-text">A ← B ← C
+</code></pre>
+<p>合并提交有两个父节点：</p>
+<pre><code class="language-text">          D ← E
+         ↗     ↘
+A ← B ← C       M
+         ↘     ↗
+          F ← G
+</code></pre>
+<p><code>M</code> 同时记录 <code>E</code> 和 <code>G</code> 为父提交。这样，历史不再是一条链，而是一张图。</p>
+<p>Git 中的大量问题都可以转化成图问题：</p>
+<ul>
+<li>两个分支是否有祖先关系；</li>
+<li>它们的共同祖先是谁；</li>
+<li>哪些提交只存在于一侧；</li>
+<li>删除某个引用后，哪些对象变得不可达；</li>
+<li>Rebase 需要复制哪一段提交。</li>
+</ul>
+<p>常见查询：</p>
+<pre><code class="language-bash"># A 是否是 B 的祖先
+git merge-base --is-ancestor A B
+
+# 两个提交的最佳共同祖先
+git merge-base branch-a branch-b
+
+# main 有、feature 没有的提交
+git log feature..main
+
+# 两边各自独有的提交
+git log --left-right main...feature
+</code></pre>
+<h2 id="section-分支不是目录副本">分支不是目录副本</h2>
+<p>创建分支：</p>
+<pre><code class="language-bash">git branch feature
+</code></pre>
+<p>不会复制整个项目。它大致只是新增一个引用：</p>
+<pre><code class="language-text">.git/refs/heads/feature
+</code></pre>
+<p>文件内容可能只有一行 Commit ID：</p>
+<pre><code class="language-text">2803068e293954b7d793d99f7db8f7be9ae26e6d
+</code></pre>
+<p>此时：</p>
+<pre><code class="language-text">main ────┐
+         ├──► C
+feature ─┘
+</code></pre>
+<p>两个分支指向同一提交，也就共享同一段历史和对象。</p>
+<p>切换到 <code>feature</code> 后创建新提交：</p>
+<pre><code class="language-text">main ───────► C
+               ↖
+feature ───────► D
+</code></pre>
+<p>更准确地画：</p>
+<pre><code class="language-text">A ← B ← C ← D
+        ▲    ▲
+        │    │
+      main feature
+</code></pre>
+<p>只有引用移动到了 <code>D</code>。旧对象没有复制。</p>
+<h2 id="section-head你当前所处位置的引用">HEAD：你当前所处位置的引用</h2>
+<p><code>.git/HEAD</code> 通常不是直接保存 Commit ID，而是：</p>
+<pre><code class="language-text">ref: refs/heads/main
+</code></pre>
+<p>含义是：</p>
+<pre><code class="language-text">HEAD ──► main ──► C
+</code></pre>
+<p>当你在 <code>main</code> 上提交：</p>
+<ol>
+<li>Git 创建新 Commit D；</li>
+<li>D 的 Parent 是 C；</li>
+<li><code>main</code> 从 C 移动到 D；</li>
+<li>HEAD 仍然指向 <code>main</code>。</li>
+</ol>
+<pre><code class="language-text">提交前：
+HEAD ─► main ─► C
+
+提交后：
+HEAD ─► main ─► D ─► C
+</code></pre>
+<p>这就是“当前分支向前移动一个提交”。</p>
+<p>查看：</p>
+<pre><code class="language-bash">git symbolic-ref HEAD
+git rev-parse HEAD
+git branch --show-current
+</code></pre>
+<p>分别回答：</p>
+<ul>
+<li>HEAD 符号指向哪个引用；</li>
+<li>HEAD 最终解析到哪个提交；</li>
+<li>当前分支名是什么。</li>
+</ul>
+<h2 id="section-detached-headhead-直接指向提交">Detached HEAD：HEAD 直接指向提交</h2>
+<p>如果执行：</p>
+<pre><code class="language-bash">git switch --detach &lt;commit-id&gt;
+</code></pre>
+<p>HEAD 不再指向分支，而是直接指向某个提交：</p>
+<pre><code class="language-text">HEAD ──► C
+main ──► E
+</code></pre>
+<p>这叫 Detached HEAD。</p>
+<p>它不是仓库损坏。你可以：</p>
+<ul>
+<li>查看旧版本；</li>
+<li>运行测试；</li>
+<li>构建旧代码；</li>
+<li>创建实验提交。</li>
+</ul>
+<p>风险在于，如果继续提交：</p>
+<pre><code class="language-text">main ─────────► E
+
+A ← B ← C ← X ← Y
+        ▲         ▲
+        │         │
+      old       HEAD
+</code></pre>
+<p><code>X</code>、<code>Y</code> 没有分支名。切走以后，它们可能只在 Reflog 中暂时可找。</p>
+<p>要保留：</p>
+<pre><code class="language-bash">git switch -c experiment
+</code></pre>
+<p>此时：</p>
+<pre><code class="language-text">HEAD ─► experiment ─► Y
+</code></pre>
+<h2 id="section-switch-时工作区为什么会变化"><code>switch</code> 时工作区为什么会变化</h2>
+<p>分支只是指针，但每个分支最终指向不同 Commit，而 Commit 指向不同 Tree 快照。</p>
+<p>执行：</p>
+<pre><code class="language-bash">git switch feature
+</code></pre>
+<p>Git 需要让：</p>
+<ul>
+<li>HEAD 指向 <code>feature</code>；</li>
+<li>暂存区匹配 <code>feature</code> 的快照；</li>
+<li>工作区文件匹配 <code>feature</code> 的快照。</li>
+</ul>
+<p>因此切分支看起来像“换了一套目录”，本质上是：</p>
+<pre><code class="language-text">读取目标 Commit 的 Tree
+→ 更新 Index
+→ 更新 Working Tree
+→ 移动 HEAD
+</code></pre>
+<p>如果工作区未提交修改会被目标分支覆盖，Git 通常拒绝切换：</p>
+<pre><code class="language-text">Your local changes would be overwritten by checkout
+</code></pre>
+<p>这是保护机制。应先：</p>
+<ul>
+<li>提交；</li>
+<li>暂存到 Stash；</li>
+<li>丢弃确认不需要的修改；</li>
+<li>或使用 Worktree 在另一个目录工作。</li>
+</ul>
+<h2 id="section-引用不只包括本地分支">引用不只包括本地分支</h2>
+<p>常见引用命名空间：</p>
+<pre><code class="language-text">refs/heads/main             本地分支
+refs/remotes/origin/main    远端跟踪引用
+refs/tags/v1.0.0            标签
+refs/stash                  Stash
+</code></pre>
+<p>也可能有：</p>
+<ul>
+<li>Pull Request 临时引用；</li>
+<li>Gerrit Review 引用；</li>
+<li>Replace 引用；</li>
+<li>Notes 引用；</li>
+<li>Bisect 过程引用。</li>
+</ul>
+<p>查看所有引用：</p>
+<pre><code class="language-bash">git show-ref
+git for-each-ref
+</code></pre>
+<p>解析任意名字：</p>
+<pre><code class="language-bash">git rev-parse main
+git rev-parse origin/main
+git rev-parse v1.0.0
+</code></pre>
+<p>Git 命令接收的“版本”经常不是完整 Commit ID，而是一个 Revision Expression。</p>
+<h2 id="section-revision-表达式如何沿图定位">Revision 表达式如何沿图定位</h2>
+<p>假设：</p>
+<pre><code class="language-text">A ← B ← C ← D
+            ▲
+           main
+</code></pre>
+<p>常用表达式：</p>
+<pre><code class="language-bash">main       # main 指向的提交 D
+HEAD       # 当前提交
+HEAD^      # 第一个父提交 C
+HEAD~2     # 沿第一个父链向前两步 B
+HEAD^{tree} # HEAD 对应的根 Tree
+</code></pre>
+<p>对于合并提交：</p>
+<pre><code class="language-text">      C
+     ↗
+A ← B ← M
+     ↘
+      D
+</code></pre>
+<p>可以使用：</p>
+<pre><code class="language-bash">M^1   # 第一个父提交
+M^2   # 第二个父提交
+</code></pre>
+<p>范围表达式：</p>
+<pre><code class="language-bash">A..B
+</code></pre>
+<p>表示从 B 可达、但从 A 不可达的提交。</p>
+<pre><code class="language-bash">A...B
+</code></pre>
+<p>在 <code>git log</code> 中通常表示两边对称差集：只属于一侧、不同时属于两侧的提交。</p>
+<p>注意，不同命令对三点语法的解释可能不同。例如：</p>
+<pre><code class="language-bash">git diff A...B
+</code></pre>
+<p>通常比较 A 与 B 的 Merge Base 到 B，而不是简单的提交集合。</p>
+<h2 id="section-fast-forward-为什么没有-merge-commit">Fast-forward 为什么没有 Merge Commit</h2>
+<p>假设：</p>
+<pre><code class="language-text">main ──► C
+          \
+           D ← E ◄── feature
+</code></pre>
+<p>如果 <code>main</code> 从 C 合并 <code>feature</code>，C 是 E 的祖先。Git 不需要创建新节点，只需把 <code>main</code> 移到 E：</p>
+<pre><code class="language-text">A ← B ← C ← D ← E
+                ▲
+                │
+         main, feature
+</code></pre>
+<p>这叫 Fast-forward。</p>
+<p>命令：</p>
+<pre><code class="language-bash">git merge feature
+</code></pre>
+<p>可以控制策略：</p>
+<pre><code class="language-bash">git merge --ff-only feature  # 只允许快进，否则失败
+git merge --no-ff feature    # 即使能快进也创建合并提交
+</code></pre>
+<p>选择取决于团队希望如何表达历史，而不是哪一个永远正确。</p>
+<h2 id="section-删除分支为什么通常不删除提交">删除分支为什么通常不删除提交</h2>
+<p>假设：</p>
+<pre><code class="language-text">A ← B ← C ← D
+        ▲    ▲
+       main feature
+</code></pre>
+<p>删除 <code>feature</code>：</p>
+<pre><code class="language-bash">git branch -d feature
+</code></pre>
+<p>只是删除指向 D 的分支引用。如果 <code>main</code> 仍在 C，D 可能变得不可达；如果 D 已经合入 main：</p>
+<pre><code class="language-text">A ← B ← C ← D
+                ▲
+               main
+</code></pre>
+<p>删除 <code>feature</code> 完全不会影响 D，因为 <code>main</code> 仍能到达它。</p>
+<p>安全删除：</p>
+<pre><code class="language-bash">git branch -d feature
+</code></pre>
+<p>如果 Git 判断分支尚未完全合并，会拒绝。</p>
+<p>强制删除：</p>
+<pre><code class="language-bash">git branch -D feature
+</code></pre>
+<p>只是绕过检查，不代表对象立即从磁盘消失。</p>
+<h2 id="section-reflog引用移动的本地操作日志">Reflog：引用移动的本地操作日志</h2>
+<p>提交图记录的是项目历史；Reflog 记录的是本地引用怎样移动。</p>
+<p>查看：</p>
+<pre><code class="language-bash">git reflog
+</code></pre>
+<p>可能得到：</p>
+<pre><code class="language-text">e7a1001 HEAD@{0}: reset: moving to origin/main
+6faad8e HEAD@{1}: commit: add Git notes
+</code></pre>
+<p>这意味着：</p>
+<ul>
+<li>当前 HEAD 在 <code>e7a1001</code>；</li>
+<li>之前曾位于 <code>6faad8e</code>；</li>
+<li>最近一次移动由 reset 造成。</li>
+</ul>
+<p>如果误执行：</p>
+<pre><code class="language-bash">git reset --hard HEAD~3
+</code></pre>
+<p>可以先找旧位置：</p>
+<pre><code class="language-bash">git reflog
+</code></pre>
+<p>再恢复：</p>
+<pre><code class="language-bash">git branch rescue HEAD@{1}
+</code></pre>
+<p>Reflog 的重要边界：</p>
+<ul>
+<li>默认是本地的，不会随 Push 上传；</li>
+<li>有过期策略；</li>
+<li>垃圾回收后不可达对象可能被删除；</li>
+<li>新 clone 不包含你旧机器上的 Reflog。</li>
+</ul>
+<p>因此它是强力兜底，但不是正式备份。</p>
+<h2 id="section-可达性引用决定哪些历史仍被保留">可达性：引用决定哪些历史仍被保留</h2>
+<p>Git 从引用出发遍历对象图：</p>
+<pre><code class="language-text">refs/heads/main
+       │
+       ▼
+Commit → Parent
+   │
+   ▼
+ Tree → Blob / subtree
+</code></pre>
+<p>只要对象能从任意受保护引用到达，它就属于可达集合。</p>
+<p>历史清理要检查的不只是 <code>main</code>：</p>
+<pre><code class="language-bash">git show-ref
+git branch --all
+git tag --list
+git stash list
+</code></pre>
+<p>旧敏感提交可能仍被以下对象引用：</p>
+<ul>
+<li>旧分支；</li>
+<li>Tag；</li>
+<li>远端跟踪引用；</li>
+<li>Stash；</li>
+<li>Reflog；</li>
+<li>平台侧 Pull Request 引用；</li>
+<li>别人的 Fork 或 Clone。</li>
+</ul>
+<p>这也是“强推 main 后为什么旧 Commit URL 可能暂时还能访问”的原因之一。</p>
+<h2 id="section-画图比背命令更可靠">画图比背命令更可靠</h2>
+<p>遇到复杂操作前，先画：</p>
+<pre><code class="language-text">当前：
+main          A ← B ← C
+                         ↖
+feature                   D ← E
+
+目标：
+main          A ← B ← C ← M
+                         ↖   ↖
+feature                   D ← E
+</code></pre>
+<p>然后问：</p>
+<ol>
+<li>哪些 Commit 已存在？</li>
+<li>哪些引用当前指向哪里？</li>
+<li>命令会创建新 Commit，还是只移动引用？</li>
+<li>工作区和暂存区是否也会改变？</li>
+<li>旧提交执行后是否仍然可达？</li>
+</ol>
+<p>这样判断：</p>
+<ul>
+<li><code>branch</code>：创建引用；</li>
+<li><code>switch</code>：移动 HEAD 并更新工作区/暂存区；</li>
+<li><code>commit</code>：创建对象并移动当前分支；</li>
+<li><code>merge</code>：快进引用或创建合并提交；</li>
+<li><code>reset</code>：移动引用，可选更新暂存区和工作区；</li>
+<li><code>rebase</code>：复制一串提交，再移动引用；</li>
+<li><code>tag</code>：创建稳定引用或 Tag 对象。</li>
+</ul>
+<h2 id="section-最小提交图实验">最小提交图实验</h2>
+<pre><code class="language-bash">mkdir git-graph-lab
+cd git-graph-lab
+git init
+
+printf &quot;base\n&quot; &gt; demo.txt
+git add demo.txt
+git commit -m &quot;A: base&quot;
+
+git switch -c feature
+printf &quot;feature\n&quot; &gt;&gt; demo.txt
+git commit -am &quot;B: feature&quot;
+
+git switch main
+printf &quot;main\n&quot; &gt; main.txt
+git add main.txt
+git commit -m &quot;C: main&quot;
+</code></pre>
+<p>观察：</p>
+<pre><code class="language-bash">git log --graph --oneline --decorate --all
+</code></pre>
+<p>然后：</p>
+<pre><code class="language-bash">git merge feature
+git log --graph --oneline --decorate --all
+git cat-file -p HEAD
+</code></pre>
+<p>你会看到合并提交包含两个 <code>parent</code>。这不是 Git 在界面上画出来的装饰，而是 Commit 对象真实记录的图结构。</p>
+
+    </article>
+  </main>
+
+  <footer class="site-footer article-footer">
+    <a href="../sections/git.html">Git 学习与实践 / 基础模型</a>
+    <a href="https://github.com/yjd953/yjd953/blob/main/posts/git-commit-graph.md">View source ↗</a>
+  </footer>
+  <script src="../assets/site.js" defer></script>
+</body>
+</html>
