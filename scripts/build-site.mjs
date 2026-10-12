@@ -2,6 +2,11 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { marked } from "marked";
+import {
+  arabicModule,
+  arabicNotes,
+  renderArabicSectionPractice,
+} from "./arabic-content.mjs";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -39,6 +44,7 @@ const modules = [
     description:
       "从对象数据库和提交图出发，掌握日常操作、分支协作、历史排查、故障恢复与隐私安全。",
   },
+  arabicModule,
 ];
 
 const notes = [
@@ -708,6 +714,7 @@ const notes = [
     description:
       "从对象可达性出发，处理错误邮箱、密钥、大文件和整仓历史重建，并验证清理结果。",
   },
+  ...arabicNotes,
 ];
 
 marked.setOptions({
@@ -824,8 +831,8 @@ function renderIndex() {
       <p class="kicker">Dale Yang / Agent engineer</p>
       <h1>Engineering<br>notes<span>.</span></h1>
       <p class="intro-copy">
-        从 Agent 如何行动，到程序如何运行，再到后端系统与 Git 协作如何落地。
-        四条路径，持续向底层追问。
+        从 Agent 如何行动、程序如何运行，到后端系统、Git 协作与语言基础。
+        五条路径，持续向底层追问。
       </p>
     </section>
 
@@ -855,7 +862,7 @@ function renderIndex() {
   return documentShell({
     title: "Dale Yang — Engineering Paths",
     description:
-      "Deep notes on Agent systems, computer systems, backend engineering, and Git.",
+      "Deep notes on Agent systems, computer systems, backend engineering, Git, and Arabic foundations.",
     body,
     bodyClass: "index-page",
     lang: "zh-CN",
@@ -864,6 +871,8 @@ function renderIndex() {
 
 function renderSection(module, moduleNotes) {
   const groups = [...new Set(moduleNotes.map((note) => note.group))];
+  const sectionPractice =
+    module.slug === "arabic" ? `${renderArabicSectionPractice()}\n` : "";
   const contents =
     groups.length > 0
       ? groups
@@ -918,7 +927,7 @@ function renderSection(module, moduleNotes) {
       <h1>${module.title}<span>.</span></h1>
       <p>${module.description}</p>
     </header>
-${contents}
+${sectionPractice}${contents}
   </main>
 
   <footer class="site-footer">
@@ -939,18 +948,58 @@ ${contents}
 function renderArticle(note, content) {
   const module = modules.find((entry) => entry.slug === note.module);
   const sectionUrl = `../sections/${module.slug}.html`;
+  const moduleNotes = notes.filter((entry) => entry.module === note.module);
+  const noteIndex = moduleNotes.findIndex((entry) => entry.slug === note.slug);
+  const previous = noteIndex > 0 ? moduleNotes[noteIndex - 1] : null;
+  const next =
+    noteIndex >= 0 && noteIndex < moduleNotes.length - 1
+      ? moduleNotes[noteIndex + 1]
+      : null;
+  const isArabicLesson = note.module === "arabic";
+  const mastheadNavigation = isArabicLesson
+    ? `<nav class="breadcrumbs" aria-label="面包屑">
+        <a href="../">全部学科</a>
+        <span aria-hidden="true">/</span>
+        <a href="${sectionUrl}">${module.title}</a>
+        <span aria-hidden="true">/</span>
+        <span aria-current="page">${note.group}</span>
+      </nav>`
+    : `<a class="back-link" href="${sectionUrl}">← ${module.title}</a>`;
+  const lessonNavigation = isArabicLesson
+    ? `<nav class="lesson-navigation" aria-label="章节导航">
+        ${
+          previous
+            ? `<a class="lesson-navigation-link lesson-navigation-previous" href="../notes/${previous.slug}.html">
+          <span>← 上一课</span>
+          <strong>${previous.title}</strong>
+        </a>`
+            : '<span class="lesson-navigation-placeholder"></span>'
+        }
+        ${
+          next
+            ? `<a class="lesson-navigation-link lesson-navigation-next" href="../notes/${next.slug}.html">
+          <span>下一课 →</span>
+          <strong>${next.title}</strong>
+        </a>`
+            : `<a class="lesson-navigation-link lesson-navigation-next" href="${sectionUrl}">
+          <span>完成本板块 →</span>
+          <strong>返回课程目录</strong>
+        </a>`
+        }
+      </nav>`
+    : "";
   const body = `
   <header class="site-header">
     <a class="wordmark" href="../" aria-label="Dale Yang home">DY<span>.</span></a>
     <nav aria-label="Primary">
-      <a href="${sectionUrl}">${module.title}</a>
+      <a href="${sectionUrl}">${isArabicLesson ? "课程目录" : module.title}</a>
       <a href="https://github.com/yjd953">GitHub</a>
     </nav>
   </header>
 
   <main class="article-layout">
     <header class="article-masthead">
-      <a class="back-link" href="${sectionUrl}">← ${module.title}</a>
+      ${mastheadNavigation}
       <p class="kicker">${module.number}.${note.number} / ${note.category} / ${note.language}</p>
       <h1>${note.title}</h1>
       <p class="article-deck">${note.description}</p>
@@ -958,7 +1007,7 @@ function renderArticle(note, content) {
 
     <article class="prose">
       ${content}
-    </article>
+    </article>${lessonNavigation ? `\n    ${lessonNavigation}` : ""}
   </main>
 
   <footer class="site-footer article-footer">
@@ -970,9 +1019,9 @@ function renderArticle(note, content) {
     title: note.pageTitle ?? `${note.title} — Dale Yang`,
     description: note.description,
     body,
-    bodyClass: "article-page",
+    bodyClass: `article-page${isArabicLesson ? " arabic-lesson-page" : ""}`,
     assetPrefix: "../",
-    lang: note.language === "ZH" ? "zh-CN" : "en",
+    lang: note.language.startsWith("ZH") ? "zh-CN" : "en",
   });
 }
 
@@ -991,7 +1040,9 @@ for (const module of modules) {
 }
 
 for (const note of notes) {
-  const markdown = (await readFile(join(root, note.source), "utf8"))
+  const sourceMarkdown =
+    note.markdown ?? (await readFile(join(root, note.source), "utf8"));
+  const markdown = sourceMarkdown
     .replace(/^#\s+.+\n+/, "")
     .replace(/\n\[Back to notes\]\(\.\.\/\)\s*$/i, "");
   await writeFile(

@@ -31,6 +31,9 @@
 **04 / [Git 学习与实践](https://yjd953.github.io/yjd953/sections/git.html)**<br>
 从对象、提交和分支出发，深入协作、历史排查、故障恢复、仓库治理、身份与隐私。
 
+**05 / [阿拉伯语零基础](https://yjd953.github.io/yjd953/sections/arabic.html)**<br>
+从右向左书写、全部 28 个字母、四种连写形态、发音部位与八组基础音标。
+
 ## 动态
 
 <picture>

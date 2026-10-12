@@ -341,6 +341,28 @@ a {
   color: var(--accent);
 }
 
+.breadcrumbs {
+  display: flex;
+  min-height: 18px;
+  margin-bottom: 70px;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 11px;
+  text-transform: uppercase;
+}
+
+.breadcrumbs a {
+  text-decoration: none;
+}
+
+.breadcrumbs a:hover,
+.breadcrumbs a:focus-visible {
+  color: var(--accent);
+}
+
 .article-masthead h1 {
   max-width: 960px;
   margin: 22px 0 28px;
@@ -532,6 +554,360 @@ a {
   color: var(--text);
 }
 
+.arabic-practice-band {
+  padding: 88px 0 36px;
+  border-bottom: 1px solid var(--line);
+}
+
+.arabic-practice-band + .section-group {
+  padding-top: 88px;
+}
+
+.arabic-stage {
+  display: grid;
+  min-height: 250px;
+  margin: 0 0 42px;
+  padding: 30px 0;
+  grid-template-columns: 230px minmax(0, 1fr);
+  gap: 38px;
+  align-items: center;
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+}
+
+.arabic-stage-glyph {
+  display: grid;
+  min-width: 0;
+  justify-items: center;
+  border-right: 1px solid var(--line);
+}
+
+.arabic-glyph,
+.arabic-name,
+.arabic-inline,
+.arabic-comparison,
+.speech-button-glyph,
+.arabic-form-cell b {
+  font-family: "Geeza Pro", "Noto Naskh Arabic", "Noto Sans Arabic",
+    "Arabic Typesetting", serif;
+}
+
+.arabic-glyph {
+  display: block;
+  min-width: 180px;
+  color: var(--text);
+  font-size: 132px;
+  font-weight: 500;
+  line-height: 1;
+  text-align: center;
+}
+
+.arabic-glyph-wide {
+  font-size: 86px;
+}
+
+.arabic-name {
+  color: var(--accent);
+  font-size: 24px;
+  line-height: 1.6;
+}
+
+.arabic-stage-copy {
+  min-width: 0;
+}
+
+.arabic-stage-copy strong {
+  display: block;
+  margin: 12px 0 14px;
+  font-size: 34px;
+  font-weight: 650;
+  line-height: 1.2;
+}
+
+.arabic-stage-copy p {
+  margin: 0;
+  color: var(--muted);
+}
+
+.arabic-inline {
+  display: inline-block;
+  min-width: 1.1em;
+  color: var(--text);
+  font-size: 1.25em;
+  line-height: 1;
+  text-align: center;
+}
+
+.arabic-inline-large {
+  font-size: 2em;
+}
+
+.arabic-comparison {
+  width: 100%;
+  margin: 28px 0;
+  padding: 24px;
+  overflow-x: auto;
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+  color: var(--text);
+  font-size: 54px;
+  line-height: 1.8;
+  text-align: center;
+  white-space: nowrap;
+}
+
+.arabic-form-grid {
+  display: grid;
+  width: 100%;
+  margin: 0 0 30px;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+}
+
+.arabic-form-cell {
+  display: grid;
+  min-width: 0;
+  min-height: 188px;
+  padding: 18px 12px;
+  place-items: center;
+  align-content: center;
+  gap: 6px;
+  text-align: center;
+}
+
+.arabic-form-cell + .arabic-form-cell {
+  border-left: 1px solid var(--line);
+}
+
+.arabic-form-cell > span {
+  color: var(--accent);
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.arabic-form-cell b {
+  display: block;
+  width: 100%;
+  color: var(--text);
+  font-size: 62px;
+  font-weight: 500;
+  line-height: 1.35;
+}
+
+.arabic-form-cell small {
+  max-width: 130px;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.speech-panel {
+  display: grid;
+  width: 100%;
+  margin: 34px 0 42px;
+  padding: 24px;
+  grid-template-columns: minmax(0, 1fr) minmax(210px, 280px);
+  gap: 22px 28px;
+  align-items: end;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: var(--surface);
+}
+
+.speech-panel-copy {
+  min-width: 0;
+}
+
+.speech-panel-eyebrow {
+  display: block;
+  margin-bottom: 8px;
+  color: var(--accent);
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.speech-panel-copy strong {
+  display: block;
+  color: var(--text);
+  font-size: 21px;
+  font-weight: 650;
+  line-height: 1.3;
+}
+
+.speech-panel-copy p {
+  margin: 8px 0 0;
+  color: var(--muted);
+  font-size: 14px;
+}
+
+.speech-settings label {
+  display: grid;
+  gap: 7px;
+}
+
+.speech-settings label > span {
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 10px;
+  text-transform: uppercase;
+}
+
+.speech-settings select {
+  width: 100%;
+  height: 40px;
+  padding: 0 34px 0 10px;
+  border: 1px solid var(--line);
+  border-radius: 2px;
+  background: var(--bg);
+  color: var(--text);
+  font: 12px var(--sans);
+}
+
+.speech-actions {
+  display: flex;
+  min-width: 0;
+  grid-column: 1 / -1;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.speech-button {
+  display: inline-flex;
+  min-height: 42px;
+  padding: 8px 13px;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  background: var(--bg);
+  color: var(--text);
+  cursor: pointer;
+  font: 600 12px var(--sans);
+  line-height: 1.2;
+}
+
+.speech-button:hover,
+.speech-button:focus-visible,
+.speech-button.is-speaking {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.speech-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.48;
+}
+
+.speech-button-icon {
+  display: grid;
+  width: 18px;
+  height: 18px;
+  place-items: center;
+  color: currentColor;
+  font-size: 11px;
+}
+
+.speech-button-compact {
+  width: 82px;
+  min-height: 76px;
+  padding: 8px 5px;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.speech-button-glyph {
+  min-height: 36px;
+  font-size: 29px;
+  font-weight: 500;
+  line-height: 1.2;
+}
+
+.speech-button-compact > span:last-child {
+  width: 100%;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.speech-feedback {
+  min-height: 18px;
+  margin: 0;
+  grid-column: 1 / -1;
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 10px;
+  line-height: 1.5;
+}
+
+.speech-feedback[data-state="error"] {
+  color: var(--accent);
+}
+
+.arabic-quick-phonetics {
+  display: grid;
+  margin-top: 28px;
+  gap: 14px;
+}
+
+.lesson-navigation {
+  display: grid;
+  width: min(100%, var(--reading));
+  min-height: 150px;
+  margin: -58px auto 110px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+}
+
+.lesson-navigation-link {
+  display: grid;
+  min-width: 0;
+  padding: 24px 0;
+  align-content: center;
+  gap: 8px;
+  text-decoration: none;
+}
+
+.lesson-navigation-next {
+  padding-left: 28px;
+  border-left: 1px solid var(--line);
+  text-align: right;
+}
+
+.lesson-navigation-previous {
+  padding-right: 28px;
+}
+
+.lesson-navigation-link span {
+  color: var(--accent);
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.lesson-navigation-link strong {
+  overflow: hidden;
+  color: var(--text);
+  font-size: 16px;
+  font-weight: 600;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+}
+
+.lesson-navigation-link:hover strong,
+.lesson-navigation-link:focus-visible strong {
+  color: var(--accent);
+}
+
 @media (max-width: 860px) {
   .index-intro {
     min-height: auto;
@@ -563,6 +939,28 @@ a {
 
   .section-masthead h1 {
     font-size: 62px;
+  }
+
+  .arabic-stage {
+    grid-template-columns: 190px minmax(0, 1fr);
+  }
+
+  .arabic-glyph {
+    min-width: 150px;
+    font-size: 112px;
+  }
+
+  .arabic-form-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .arabic-form-cell:nth-child(3) {
+    border-left: 0;
+    border-top: 1px solid var(--line);
+  }
+
+  .arabic-form-cell:nth-child(4) {
+    border-top: 1px solid var(--line);
   }
 }
 
@@ -672,6 +1070,10 @@ a {
     margin-bottom: 48px;
   }
 
+  .breadcrumbs {
+    margin-bottom: 48px;
+  }
+
   .article-masthead h1 {
     margin-top: 18px;
     font-size: 40px;
@@ -711,6 +1113,91 @@ a {
   .site-footer {
     min-height: 96px;
     gap: 20px;
+  }
+
+  .arabic-practice-band {
+    padding: 64px 0 30px;
+  }
+
+  .arabic-stage {
+    min-height: 0;
+    padding: 24px 0 28px;
+    grid-template-columns: 1fr;
+    gap: 22px;
+  }
+
+  .arabic-stage-glyph {
+    padding-bottom: 20px;
+    border-right: 0;
+    border-bottom: 1px solid var(--line);
+  }
+
+  .arabic-glyph {
+    min-width: 0;
+    font-size: 96px;
+  }
+
+  .arabic-glyph-wide {
+    font-size: 66px;
+  }
+
+  .arabic-stage-copy strong {
+    font-size: 27px;
+  }
+
+  .arabic-comparison {
+    padding: 18px 12px;
+    font-size: 42px;
+  }
+
+  .arabic-form-cell {
+    min-height: 154px;
+  }
+
+  .arabic-form-cell b {
+    font-size: 50px;
+  }
+
+  .speech-panel {
+    padding: 18px;
+    grid-template-columns: 1fr;
+  }
+
+  .speech-settings,
+  .speech-actions,
+  .speech-feedback {
+    grid-column: 1;
+  }
+
+  .speech-button {
+    min-height: 44px;
+  }
+
+  .speech-button-compact {
+    width: calc(25% - 8px);
+    min-width: 64px;
+    min-height: 72px;
+  }
+
+  .lesson-navigation {
+    min-height: 0;
+    margin-top: -36px;
+    margin-bottom: 84px;
+    grid-template-columns: 1fr;
+  }
+
+  .lesson-navigation-placeholder {
+    display: none;
+  }
+
+  .lesson-navigation-link {
+    min-height: 106px;
+  }
+
+  .lesson-navigation-next {
+    padding-left: 0;
+    border-top: 1px solid var(--line);
+    border-left: 0;
   }
 }
 

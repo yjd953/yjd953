@@ -32,6 +32,9 @@ Java, Go, JVM, Redis, MySQL, MQ, networking, and distributed systems.
 **04 / [Git Learning and Practice](https://yjd953.github.io/yjd953/sections/git.html)**<br>
 Objects, commits, branches, collaboration, history inspection, recovery, repository hygiene, identity, and privacy.
 
+**05 / [Arabic Alphabet and Sounds](https://yjd953.github.io/yjd953/sections/arabic.html)**<br>
+Right-to-left writing, all 28 letters, contextual forms, articulation, and eight groups of foundational pronunciation marks.
+
 ## Activity
 
 <picture>

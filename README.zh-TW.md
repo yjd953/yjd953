@@ -31,6 +31,9 @@
 **04 / [Git 學習與實踐](https://yjd953.github.io/yjd953/sections/git.html)**<br>
 從物件、提交與分支出發，深入協作、歷史追查、故障復原、儲存庫治理、身分與隱私。
 
+**05 / [阿拉伯語零基礎](https://yjd953.github.io/yjd953/sections/arabic.html)**<br>
+從右向左書寫、完整 28 個字母、四種連寫形態、發音部位與八組基礎音標。
+
 ## 動態
 
 <picture>

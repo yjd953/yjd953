@@ -33,6 +33,9 @@ Java, Go, JVM, Redis, MySQL, MQ, Netzwerke und verteilte Systeme.
 **04 / [Git lernen und anwenden](https://yjd953.github.io/yjd953/sections/git.html)**<br>
 Objekte, Commits, Branches, Zusammenarbeit, Historienanalyse, Wiederherstellung, Repository-Pflege, Identität und Datenschutz.
 
+**05 / [Arabisches Alphabet und Laute](https://yjd953.github.io/yjd953/sections/arabic.html)**<br>
+Rechts-nach-links-Schrift, alle 28 Buchstaben, verbundene Formen, Artikulation und acht Gruppen grundlegender Lautzeichen.
+
 ## Aktivität
 
 <picture>

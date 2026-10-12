@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="理解阿拉伯字母为什么会变形、哪些字母会断开，以及浏览器如何自动完成上下文塑形。">
+  <meta name="theme-color" content="#f1f1ee">
+  <title>从右向左与四种连写形态 — Dale Yang</title>
+  <link rel="stylesheet" href="../assets/site.css">
+</head>
+<body class="article-page arabic-lesson-page">
+  <div class="reading-progress" id="readingProgress" aria-hidden="true"></div>
+
+  <header class="site-header">
+    <a class="wordmark" href="../" aria-label="Dale Yang home">DY<span>.</span></a>
+    <nav aria-label="Primary">
+      <a href="../sections/arabic.html">课程目录</a>
+      <a href="https://github.com/yjd953">GitHub</a>
+    </nav>
+  </header>
+
+  <main class="article-layout">
+    <header class="article-masthead">
+      <nav class="breadcrumbs" aria-label="面包屑">
+        <a href="../">全部学科</a>
+        <span aria-hidden="true">/</span>
+        <a href="../sections/arabic.html">阿拉伯语零基础</a>
+        <span aria-hidden="true">/</span>
+        <span aria-current="page">开始之前</span>
+      </nav>
+      <p class="kicker">05.03 / Writing system / ZH + AR</p>
+      <h1>从右向左与四种连写形态</h1>
+      <p class="article-deck">理解阿拉伯字母为什么会变形、哪些字母会断开，以及浏览器如何自动完成上下文塑形。</p>
+    </header>
+
+    <article class="prose">
+      <p>阿拉伯语整体从右向左书写，但数字等片段可能按自身方向显示。学习字母时，先把“先写右边，再向左推进”固定下来。</p>
+<section class="speech-panel" data-speech-panel aria-label="六个断连字母听音">
+  <div class="speech-panel-copy">
+    <span class="speech-panel-eyebrow">Connection breakers</span>
+    <strong>六个断连字母听音</strong>
+    <p>它们共享“不向左连接”的书写属性，但读音完全不同。先听名称，再观察下方连接示例。</p>
+  </div>
+  <div class="speech-settings">
+    <label>
+      <span>阿拉伯语音色</span>
+      <select data-speech-voice aria-label="选择阿拉伯语音色">
+        <option value="">正在检测可用音色…</option>
+      </select>
+    </label>
+  </div>
+  <div class="speech-actions">
+    <button class="speech-button" type="button" data-speech-text="أَلِف، دَال، ذَال، رَاء، زَاي، وَاو" data-speech-repeat="1" data-speech-rate="0.6" aria-label="播放六个字母名" title="播放六个字母名">
+  <span class="speech-button-icon" aria-hidden="true">▶</span>
+  <span>播放六个字母名</span>
+</button>
+    <button class="speech-button" type="button" data-speech-text="أَلِف، دَال، ذَال، رَاء، زَاي، وَاو" data-speech-repeat="3" data-speech-rate="0.55" aria-label="重复 3 次" title="重复 3 次">
+  <span class="speech-button-icon" aria-hidden="true">▶</span>
+  <span>重复 3 次</span>
+</button>
+  </div>
+  <p class="speech-feedback" data-speech-feedback aria-live="polite">点击播放后，浏览器会优先使用 ar-SA 标准阿拉伯语音色。</p>
+</section><h2 id="section-逻辑字符与视觉字形">逻辑字符与视觉字形</h2>
+<p>同一个 Unicode 字母只输入一次，浏览器根据相邻字符自动选择视觉形态：</p>
+<div class="arabic-form-grid">
+  <div class="arabic-form-cell"><span>独立</span><b lang="ar">ب</b><small>两侧不连接</small></div>
+  <div class="arabic-form-cell"><span>词首</span><b lang="ar">بـ</b><small>右侧起笔，向左连接</small></div>
+  <div class="arabic-form-cell"><span>词中</span><b lang="ar">ـبـ</b><small>两侧连接</small></div>
+  <div class="arabic-form-cell"><span>词尾</span><b lang="ar">ـب</b><small>从右侧接入后收尾</small></div>
+</div><p>延长线 <code>ـ</code> 只用于教学展示连接端，不是 ب 的组成部分。实际文本中输入普通字母，塑形引擎会自动连接。</p>
+<h2 id="section-六个断连字母">六个断连字母</h2>
+<div class="arabic-comparison" lang="ar" dir="rtl">ا　د　ذ　ر　ز　و</div><p>它们可以接住右侧先写字母，却不能继续连接左侧后写字母：</p>
+<pre><code>右侧字母 → [断连字母]   [左侧重新起笔]</code></pre><p>Unicode 把这些字母标为 Right_Joining；大多数其他基础字母是 Dual_Joining。</p>
+<h2 id="section-四种形态不等于四个字母">四种形态不等于四个字母</h2>
+<p><span class="arabic-inline" lang="ar">ب</span>、<span class="arabic-inline" lang="ar">بـ</span>、<span class="arabic-inline" lang="ar">ـبـ</span>、<span class="arabic-inline" lang="ar">ـب</span> 都是同一个字母 ب。认字时抓两层：</p>
+<ol>
+<li><strong>骨架</strong>：碗形、三齿、圆环、高竖干；</li>
+<li><strong>点位</strong>：上、下、内部，以及点的数量。</li>
+</ol>
+<h2 id="section-点要最后补但不能漏">点要最后补，但不能漏</h2>
+<p>字母家族：</p>
+<div class="arabic-comparison" lang="ar" dir="rtl">ب ت ث　ج ح خ　د ذ　ر ز　س ش　ص ض　ط ظ　ع غ　ف ق</div><p>练习建议：</p>
+<ol>
+<li>先写一整行同骨架主干；</li>
+<li>再逐个补点；</li>
+<li>遮住点只认家族；</li>
+<li>露出点说出具体字母；</li>
+<li>在词首、词中、词尾形之间往返辨认。</li>
+</ol>
+<h2 id="section-lām-alif">Lām + Alif</h2>
+<p><span class="arabic-inline" lang="ar">ل</span> 后接 <span class="arabic-inline" lang="ar">ا</span> 时通常显示为连字 <span class="arabic-inline" lang="ar">لا</span>。它仍然是两个逻辑字母，不是第 29 个基础字母。</p>
+<h2 id="section-输入与复制时的注意事项">输入与复制时的注意事项</h2>
+<ul>
+<li>不要从“阿拉伯字母表现形式”区复制孤立的兼容字形；</li>
+<li>优先输入基础 Unicode 字母，让浏览器塑形；</li>
+<li>短元音是组合附标，逻辑上跟在辅音后；</li>
+<li>混合中文、拉丁字母和阿语时，必要时给阿语片段添加 <code>dir=&quot;rtl&quot;</code>；</li>
+<li>文件名和代码标识符中的双向文本有安全风险，初学阶段不要混用。</li>
+</ul>
+<h2 id="section-连写判断练习">连写判断练习</h2>
+<p>按从右向左顺序观察：</p>
+<div class="arabic-comparison" lang="ar" dir="rtl">بـتـث　جـحـخ　سـش　صـض　عـغ</div><p>再观察断连：</p>
+<div class="arabic-comparison" lang="ar" dir="rtl">بـا ت　بـد ت　بـر ت　بـو ت</div><p>看见 ا、د、ر、و 后，左侧 ت 都重新起笔。这是连接属性，不是空格。</p>
+<h2 id="section-当课检查">当课检查</h2>
+<ul>
+<li><input disabled type="checkbox"> 能说出整体书写方向；</li>
+<li><input disabled type="checkbox"> 能解释独立、词首、词中、词尾形；</li>
+<li><input disabled type="checkbox"> 能背出六个断连字母；</li>
+<li><input disabled type="checkbox"> 能说明延长线不是字母内容；</li>
+<li><input disabled type="checkbox"> 能解释 لا 为什么仍是两个字母。</li>
+</ul>
+
+    </article>
+    <nav class="lesson-navigation" aria-label="章节导航">
+        <a class="lesson-navigation-link lesson-navigation-previous" href="../notes/arabic-articulation-map.html">
+          <span>← 上一课</span>
+          <strong>阿拉伯语发音的口腔地图</strong>
+        </a>
+        <a class="lesson-navigation-link lesson-navigation-next" href="../notes/arabic-letter-alif.html">
+          <span>下一课 →</span>
+          <strong>ا：艾利夫</strong>
+        </a>
+      </nav>
+  </main>
+
+  <footer class="site-footer article-footer">
+    <a href="../sections/arabic.html">阿拉伯语零基础 / 开始之前</a>
+    <a href="https://github.com/yjd953/yjd953/blob/main/scripts/arabic-content.mjs">View source ↗</a>
+  </footer>
+  <script src="../assets/site.js" defer></script>
+</body>
+</html>
