@@ -660,6 +660,10 @@ const phoneticNotes = phoneticLessons.map((lesson, index) => ({
 
 export const arabicNotes = [...foundations, ...letterNotes, ...phoneticNotes];
 
+function serializePracticeData(data) {
+  return JSON.stringify(data).replaceAll("<", "\\u003c");
+}
+
 export function renderArabicSectionPractice() {
   const letterButtons = arabicLetters
     .map((letter) =>
@@ -683,23 +687,113 @@ export function renderArabicSectionPractice() {
       }),
     )
     .join("\n");
+  const practiceData = {
+    version: 1,
+    letters: arabicLetters.map((letter) => ({
+      order: letter.order,
+      slug: letter.slug,
+      glyph: letter.glyph,
+      nameZh: letter.nameZh,
+      speechName: letter.speechName,
+      joining: letter.joining,
+      forms: letter.forms,
+    })),
+    phonetics: phoneticLessons.slice(0, 5).map((lesson) => ({
+      order: lesson.order,
+      nameZh: lesson.nameZh,
+      display: lesson.display,
+      audio:
+        {
+          1: "بَ",
+          2: "بِ",
+          3: "بُ",
+          4: "أَبْ",
+          5: "أَبَّ",
+        }[lesson.order] ?? lesson.speech,
+    })),
+  };
 
-  return `<section class="arabic-practice-band" aria-labelledby="arabicPracticeTitle">
+  return `<section class="arabic-practice-band" data-arabic-practice aria-labelledby="arabicPracticeTitle">
     <div class="section-label">
-      <h2 id="arabicPracticeTitle">Alphabet audio desk</h2>
-      <span>click to listen</span>
+      <h2 id="arabicPracticeTitle">Practice studio</h2>
+      <span data-practice-storage>local only</span>
     </div>
-    ${speechPanel({
-      eyebrow: "Quick practice",
-      title: "28 个字母快速听音",
-      description:
-        "点击任一字母播放标准字母名。实际使用的阿拉伯语音色会显示在下方。",
-      actions: [letterButtons],
-    })}
-    <div class="arabic-quick-phonetics">
-      <span class="note-meta">基础音标</span>
-      <div class="speech-actions">${phoneticButtons}</div>
+
+    <div class="arabic-practice-summary" aria-label="学习进度">
+      <div class="practice-stat">
+        <span>今日训练</span>
+        <strong data-practice-today>0:00 / 5:00</strong>
+      </div>
+      <div class="practice-stat">
+        <span>连续学习</span>
+        <strong data-practice-streak>0 天</strong>
+      </div>
+      <div class="practice-stat">
+        <span>总正确率</span>
+        <strong data-practice-accuracy>—</strong>
+      </div>
+      <div class="practice-stat">
+        <span>待复习</span>
+        <strong data-practice-mistakes>0 题</strong>
+      </div>
     </div>
+
+    <div class="practice-daily-track" aria-hidden="true">
+      <span data-practice-daily-bar></span>
+    </div>
+
+    <div class="practice-mode-switch" role="tablist" aria-label="练习模式">
+      <button type="button" role="tab" aria-selected="true" data-practice-mode="daily">每日 5 分钟</button>
+      <button type="button" role="tab" aria-selected="false" data-practice-mode="form">字形辨认</button>
+      <button type="button" role="tab" aria-selected="false" data-practice-mode="listen">听音辨字</button>
+      <button type="button" role="tab" aria-selected="false" data-practice-mode="phonetic">音标辨听</button>
+      <button type="button" role="tab" aria-selected="false" data-practice-mode="mistakes">
+        错题 <span data-practice-mistake-badge>0</span>
+      </button>
+    </div>
+
+    <div class="arabic-practice-tool">
+      <div class="practice-question-head">
+        <div>
+          <span class="note-meta" data-practice-mode-label>每日混合训练</span>
+          <span data-practice-question-count>未开始</span>
+        </div>
+        <button class="practice-reset" type="button" data-practice-reset>清除记录</button>
+      </div>
+
+      <div class="practice-question" data-practice-question>
+        <p class="practice-prompt" data-practice-prompt>每天练 5 分钟，题目会混合字形、字母听音和基础音标。</p>
+        <div class="practice-stimulus" lang="ar" dir="rtl" data-practice-stimulus>٥:٠٠</div>
+        <button class="speech-button practice-audio-button" type="button" data-practice-audio data-speech-text="" data-speech-repeat="1" data-speech-rate="0.62" hidden>
+          <span class="speech-button-icon" aria-hidden="true">▶</span>
+          <span>播放题目</span>
+        </button>
+        <p class="practice-audio-status" data-practice-speech-feedback aria-live="polite"></p>
+        <div class="practice-options" data-practice-options></div>
+        <div class="practice-actions">
+          <button class="practice-primary" type="button" data-practice-start>开始今日训练</button>
+          <button class="practice-primary" type="button" data-practice-next hidden>下一题</button>
+        </div>
+        <p class="practice-feedback" data-practice-feedback aria-live="polite">进度只保存在当前浏览器。</p>
+      </div>
+    </div>
+
+    <details class="arabic-audio-reference">
+      <summary>自由听音表</summary>
+      ${speechPanel({
+        eyebrow: "Free listening",
+        title: "28 个字母快速听音",
+        description:
+          "点击任一字母播放字母名；音色由浏览器和操作系统提供。",
+        actions: [letterButtons],
+      })}
+      <div class="arabic-quick-phonetics">
+        <span class="note-meta">基础音标</span>
+        <div class="speech-actions">${phoneticButtons}</div>
+      </div>
+    </details>
+
+    <script type="application/json" data-arabic-practice-data>${serializePracticeData(practiceData)}</script>
   </section>`;
 }
 

@@ -26,16 +26,78 @@
       <h1>阿拉伯语零基础<span>.</span></h1>
       <p>从右向左书写、28 个字母与 8 组基础音标出发，逐字掌握字形、连写、发音部位与标准朗读。</p>
     </header>
-<section class="arabic-practice-band" aria-labelledby="arabicPracticeTitle">
+<section class="arabic-practice-band" data-arabic-practice aria-labelledby="arabicPracticeTitle">
     <div class="section-label">
-      <h2 id="arabicPracticeTitle">Alphabet audio desk</h2>
-      <span>click to listen</span>
+      <h2 id="arabicPracticeTitle">Practice studio</h2>
+      <span data-practice-storage>local only</span>
     </div>
-    <section class="speech-panel" data-speech-panel aria-label="28 个字母快速听音">
+
+    <div class="arabic-practice-summary" aria-label="学习进度">
+      <div class="practice-stat">
+        <span>今日训练</span>
+        <strong data-practice-today>0:00 / 5:00</strong>
+      </div>
+      <div class="practice-stat">
+        <span>连续学习</span>
+        <strong data-practice-streak>0 天</strong>
+      </div>
+      <div class="practice-stat">
+        <span>总正确率</span>
+        <strong data-practice-accuracy>—</strong>
+      </div>
+      <div class="practice-stat">
+        <span>待复习</span>
+        <strong data-practice-mistakes>0 题</strong>
+      </div>
+    </div>
+
+    <div class="practice-daily-track" aria-hidden="true">
+      <span data-practice-daily-bar></span>
+    </div>
+
+    <div class="practice-mode-switch" role="tablist" aria-label="练习模式">
+      <button type="button" role="tab" aria-selected="true" data-practice-mode="daily">每日 5 分钟</button>
+      <button type="button" role="tab" aria-selected="false" data-practice-mode="form">字形辨认</button>
+      <button type="button" role="tab" aria-selected="false" data-practice-mode="listen">听音辨字</button>
+      <button type="button" role="tab" aria-selected="false" data-practice-mode="phonetic">音标辨听</button>
+      <button type="button" role="tab" aria-selected="false" data-practice-mode="mistakes">
+        错题 <span data-practice-mistake-badge>0</span>
+      </button>
+    </div>
+
+    <div class="arabic-practice-tool">
+      <div class="practice-question-head">
+        <div>
+          <span class="note-meta" data-practice-mode-label>每日混合训练</span>
+          <span data-practice-question-count>未开始</span>
+        </div>
+        <button class="practice-reset" type="button" data-practice-reset>清除记录</button>
+      </div>
+
+      <div class="practice-question" data-practice-question>
+        <p class="practice-prompt" data-practice-prompt>每天练 5 分钟，题目会混合字形、字母听音和基础音标。</p>
+        <div class="practice-stimulus" lang="ar" dir="rtl" data-practice-stimulus>٥:٠٠</div>
+        <button class="speech-button practice-audio-button" type="button" data-practice-audio data-speech-text="" data-speech-repeat="1" data-speech-rate="0.62" hidden>
+          <span class="speech-button-icon" aria-hidden="true">▶</span>
+          <span>播放题目</span>
+        </button>
+        <p class="practice-audio-status" data-practice-speech-feedback aria-live="polite"></p>
+        <div class="practice-options" data-practice-options></div>
+        <div class="practice-actions">
+          <button class="practice-primary" type="button" data-practice-start>开始今日训练</button>
+          <button class="practice-primary" type="button" data-practice-next hidden>下一题</button>
+        </div>
+        <p class="practice-feedback" data-practice-feedback aria-live="polite">进度只保存在当前浏览器。</p>
+      </div>
+    </div>
+
+    <details class="arabic-audio-reference">
+      <summary>自由听音表</summary>
+      <section class="speech-panel" data-speech-panel aria-label="28 个字母快速听音">
   <div class="speech-panel-copy">
-    <span class="speech-panel-eyebrow">Quick practice</span>
+    <span class="speech-panel-eyebrow">Free listening</span>
     <strong>28 个字母快速听音</strong>
-    <p>点击任一字母播放标准字母名。实际使用的阿拉伯语音色会显示在下方。</p>
+    <p>点击任一字母播放字母名；音色由浏览器和操作系统提供。</p>
   </div>
   <div class="speech-settings">
     <label>
@@ -161,9 +223,9 @@
   </div>
   <p class="speech-feedback" data-speech-feedback aria-live="polite">点击播放后，浏览器会优先使用 ar-SA 标准阿拉伯语音色。</p>
 </section>
-    <div class="arabic-quick-phonetics">
-      <span class="note-meta">基础音标</span>
-      <div class="speech-actions"><button class="speech-button speech-button-compact" type="button" data-speech-text="بَ تَ ثَ جَ" data-speech-repeat="1" data-speech-rate="0.62" aria-label="Fatha" title="Fatha">
+      <div class="arabic-quick-phonetics">
+        <span class="note-meta">基础音标</span>
+        <div class="speech-actions"><button class="speech-button speech-button-compact" type="button" data-speech-text="بَ تَ ثَ جَ" data-speech-repeat="1" data-speech-rate="0.62" aria-label="Fatha" title="Fatha">
   <span class="speech-button-glyph" lang="ar" dir="rtl">بَ</span>
   <span>Fatha</span>
 </button>
@@ -195,7 +257,10 @@
   <span class="speech-button-glyph" lang="ar" dir="rtl">ءَ  أَ  إِ  آ</span>
   <span>Hamza 与 Maddah</span>
 </button></div>
-    </div>
+      </div>
+    </details>
+
+    <script type="application/json" data-arabic-practice-data>{"version":1,"letters":[{"order":1,"slug":"arabic-letter-alif","glyph":"ا","nameZh":"艾利夫","speechName":"أَلِف","joining":"right","forms":{"isolated":"ا","initial":"ا","medial":"ـا","final":"ـا"}},{"order":2,"slug":"arabic-letter-ba","glyph":"ب","nameZh":"巴","speechName":"بَاء","joining":"dual","forms":{"isolated":"ب","initial":"بـ","medial":"ـبـ","final":"ـب"}},{"order":3,"slug":"arabic-letter-ta","glyph":"ت","nameZh":"塔","speechName":"تَاء","joining":"dual","forms":{"isolated":"ت","initial":"تـ","medial":"ـتـ","final":"ـت"}},{"order":4,"slug":"arabic-letter-tha","glyph":"ث","nameZh":"萨（齿间音）","speechName":"ثَاء","joining":"dual","forms":{"isolated":"ث","initial":"ثـ","medial":"ـثـ","final":"ـث"}},{"order":5,"slug":"arabic-letter-jim","glyph":"ج","nameZh":"吉姆","speechName":"جِيم","joining":"dual","forms":{"isolated":"ج","initial":"جـ","medial":"ـجـ","final":"ـج"}},{"order":6,"slug":"arabic-letter-ha-pharyngeal","glyph":"ح","nameZh":"哈（清咽音）","speechName":"حَاء","joining":"dual","forms":{"isolated":"ح","initial":"حـ","medial":"ـحـ","final":"ـح"}},{"order":7,"slug":"arabic-letter-kha","glyph":"خ","nameZh":"赫","speechName":"خَاء","joining":"dual","forms":{"isolated":"خ","initial":"خـ","medial":"ـخـ","final":"ـخ"}},{"order":8,"slug":"arabic-letter-dal","glyph":"د","nameZh":"达勒","speechName":"دَال","joining":"right","forms":{"isolated":"د","initial":"د","medial":"ـد","final":"ـد"}},{"order":9,"slug":"arabic-letter-dhal","glyph":"ذ","nameZh":"扎勒（浊齿间音）","speechName":"ذَال","joining":"right","forms":{"isolated":"ذ","initial":"ذ","medial":"ـذ","final":"ـذ"}},{"order":10,"slug":"arabic-letter-ra","glyph":"ر","nameZh":"拉","speechName":"رَاء","joining":"right","forms":{"isolated":"ر","initial":"ر","medial":"ـر","final":"ـر"}},{"order":11,"slug":"arabic-letter-zay","glyph":"ز","nameZh":"宰","speechName":"زَاي","joining":"right","forms":{"isolated":"ز","initial":"ز","medial":"ـز","final":"ـز"}},{"order":12,"slug":"arabic-letter-sin","glyph":"س","nameZh":"辛","speechName":"سِين","joining":"dual","forms":{"isolated":"س","initial":"سـ","medial":"ـسـ","final":"ـس"}},{"order":13,"slug":"arabic-letter-shin","glyph":"ش","nameZh":"希恩","speechName":"شِين","joining":"dual","forms":{"isolated":"ش","initial":"شـ","medial":"ـشـ","final":"ـش"}},{"order":14,"slug":"arabic-letter-sad","glyph":"ص","nameZh":"萨德（厚音）","speechName":"صَاد","joining":"dual","forms":{"isolated":"ص","initial":"صـ","medial":"ـصـ","final":"ـص"}},{"order":15,"slug":"arabic-letter-dad","glyph":"ض","nameZh":"达德（厚音）","speechName":"ضَاد","joining":"dual","forms":{"isolated":"ض","initial":"ضـ","medial":"ـضـ","final":"ـض"}},{"order":16,"slug":"arabic-letter-ta-emphatic","glyph":"ط","nameZh":"塔（厚音）","speechName":"طَاء","joining":"dual","forms":{"isolated":"ط","initial":"طـ","medial":"ـطـ","final":"ـط"}},{"order":17,"slug":"arabic-letter-za-emphatic","glyph":"ظ","nameZh":"扎（厚齿间音）","speechName":"ظَاء","joining":"dual","forms":{"isolated":"ظ","initial":"ظـ","medial":"ـظـ","final":"ـظ"}},{"order":18,"slug":"arabic-letter-ayn","glyph":"ع","nameZh":"阿因","speechName":"عَيْن","joining":"dual","forms":{"isolated":"ع","initial":"عـ","medial":"ـعـ","final":"ـع"}},{"order":19,"slug":"arabic-letter-ghayn","glyph":"غ","nameZh":"盖因","speechName":"غَيْن","joining":"dual","forms":{"isolated":"غ","initial":"غـ","medial":"ـغـ","final":"ـغ"}},{"order":20,"slug":"arabic-letter-fa","glyph":"ف","nameZh":"法","speechName":"فَاء","joining":"dual","forms":{"isolated":"ف","initial":"فـ","medial":"ـفـ","final":"ـف"}},{"order":21,"slug":"arabic-letter-qaf","glyph":"ق","nameZh":"嘎夫（小舌塞音）","speechName":"قَاف","joining":"dual","forms":{"isolated":"ق","initial":"قـ","medial":"ـقـ","final":"ـق"}},{"order":22,"slug":"arabic-letter-kaf","glyph":"ك","nameZh":"卡夫","speechName":"كَاف","joining":"dual","forms":{"isolated":"ك","initial":"كـ","medial":"ـكـ","final":"ـك"}},{"order":23,"slug":"arabic-letter-lam","glyph":"ل","nameZh":"拉姆","speechName":"لَام","joining":"dual","forms":{"isolated":"ل","initial":"لـ","medial":"ـلـ","final":"ـل"}},{"order":24,"slug":"arabic-letter-mim","glyph":"م","nameZh":"米姆","speechName":"مِيم","joining":"dual","forms":{"isolated":"م","initial":"مـ","medial":"ـمـ","final":"ـم"}},{"order":25,"slug":"arabic-letter-nun","glyph":"ن","nameZh":"努恩","speechName":"نُون","joining":"dual","forms":{"isolated":"ن","initial":"نـ","medial":"ـنـ","final":"ـن"}},{"order":26,"slug":"arabic-letter-ha-glottal","glyph":"ه","nameZh":"哈（声门音）","speechName":"هَاء","joining":"dual","forms":{"isolated":"ه","initial":"هـ","medial":"ـهـ","final":"ـه"}},{"order":27,"slug":"arabic-letter-waw","glyph":"و","nameZh":"瓦乌","speechName":"وَاو","joining":"right","forms":{"isolated":"و","initial":"و","medial":"ـو","final":"ـو"}},{"order":28,"slug":"arabic-letter-ya","glyph":"ي","nameZh":"雅","speechName":"يَاء","joining":"dual","forms":{"isolated":"ي","initial":"يـ","medial":"ـيـ","final":"ـي"}}],"phonetics":[{"order":1,"nameZh":"Fatha：短 /a/","display":"بَ","audio":"بَ"},{"order":2,"nameZh":"Kasra：短 /i/","display":"بِ","audio":"بِ"},{"order":3,"nameZh":"Damma：短 /u/","display":"بُ","audio":"بُ"},{"order":4,"nameZh":"Sukun：无后续元音","display":"بْ","audio":"أَبْ"},{"order":5,"nameZh":"Shadda：辅音加倍","display":"بَّ","audio":"أَبَّ"}]}</script>
   </section>
 
       <section class="section-group" aria-labelledby="group-开始之前">

@@ -559,6 +559,334 @@ a {
   border-bottom: 1px solid var(--line);
 }
 
+.arabic-practice-summary {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+}
+
+.practice-stat {
+  display: grid;
+  min-width: 0;
+  min-height: 106px;
+  padding: 20px 22px;
+  align-content: center;
+  gap: 7px;
+}
+
+.practice-stat + .practice-stat {
+  border-left: 1px solid var(--line);
+}
+
+.practice-stat span {
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 10px;
+  text-transform: uppercase;
+}
+
+.practice-stat strong {
+  font-size: 22px;
+  font-weight: 650;
+  line-height: 1.2;
+}
+
+.practice-daily-track {
+  width: 100%;
+  height: 3px;
+  background: var(--surface);
+}
+
+.practice-daily-track span {
+  display: block;
+  width: 0;
+  height: 100%;
+  background: var(--accent);
+  transition: width 240ms ease;
+}
+
+.practice-mode-switch {
+  display: flex;
+  margin-top: 28px;
+  overflow-x: auto;
+  border-bottom: 1px solid var(--line);
+  scrollbar-width: none;
+}
+
+.practice-mode-switch::-webkit-scrollbar {
+  display: none;
+}
+
+.practice-mode-switch button {
+  min-width: 0;
+  min-height: 44px;
+  padding: 0 18px;
+  flex: 1 0 auto;
+  border: 0;
+  border-right: 1px solid var(--line);
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  font: 600 12px var(--sans);
+  white-space: nowrap;
+}
+
+.practice-mode-switch button:first-child {
+  border-left: 1px solid var(--line);
+}
+
+.practice-mode-switch button:hover,
+.practice-mode-switch button:focus-visible {
+  color: var(--accent);
+}
+
+.practice-mode-switch button[aria-selected="true"] {
+  background: var(--text);
+  color: var(--bg);
+}
+
+.practice-mode-switch button:disabled {
+  cursor: not-allowed;
+  opacity: 0.38;
+}
+
+.practice-mode-switch button span {
+  display: inline-grid;
+  min-width: 18px;
+  height: 18px;
+  margin-left: 4px;
+  padding: 0 4px;
+  place-items: center;
+  border: 1px solid currentColor;
+  border-radius: 50%;
+  font: 700 9px var(--mono);
+}
+
+.arabic-practice-tool {
+  border-bottom: 1px solid var(--line);
+}
+
+.practice-question-head {
+  display: flex;
+  min-height: 58px;
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: 1px solid var(--line);
+}
+
+.practice-question-head > div {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 14px;
+}
+
+.practice-question-head > div > span:last-child {
+  color: var(--muted);
+  font: 10px var(--mono);
+  text-transform: uppercase;
+}
+
+.practice-reset {
+  padding: 8px 0 8px 12px;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  font: 10px var(--mono);
+}
+
+.practice-reset:hover,
+.practice-reset:focus-visible {
+  color: var(--accent);
+}
+
+.practice-reset:disabled {
+  cursor: not-allowed;
+  opacity: 0.35;
+}
+
+.practice-question {
+  display: grid;
+  min-height: 490px;
+  padding: 46px 0 54px;
+  justify-items: center;
+  align-content: start;
+  grid-template-rows: auto minmax(112px, auto) auto auto auto auto;
+}
+
+.practice-prompt {
+  min-height: 30px;
+  margin: 0;
+  color: var(--text);
+  font-size: 19px;
+  font-weight: 600;
+  text-align: center;
+}
+
+.practice-stimulus {
+  display: grid;
+  min-width: 180px;
+  min-height: 112px;
+  margin: 10px 0 4px;
+  place-items: center;
+  color: var(--text);
+  font-family: "Geeza Pro", "Noto Naskh Arabic", "Noto Sans Arabic",
+    "Arabic Typesetting", var(--sans);
+  font-size: 76px;
+  font-weight: 500;
+  line-height: 1;
+}
+
+.practice-stimulus[lang="en"] {
+  font-family: var(--mono);
+  font-size: 48px;
+  font-weight: 650;
+}
+
+.practice-audio-button {
+  min-width: 132px;
+  margin: 24px 0 4px;
+}
+
+.practice-audio-button[hidden],
+.practice-stimulus[hidden],
+.practice-primary[hidden] {
+  display: none !important;
+}
+
+.practice-audio-status {
+  min-height: 18px;
+  margin: 7px 0 14px;
+  color: var(--muted);
+  font: 10px/1.5 var(--mono);
+  text-align: center;
+}
+
+.practice-audio-status[data-state="error"] {
+  color: var(--accent);
+}
+
+.practice-options {
+  display: grid;
+  width: min(100%, 780px);
+  min-height: 120px;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.practice-option {
+  display: grid;
+  min-width: 0;
+  min-height: 116px;
+  padding: 12px;
+  place-items: center;
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+}
+
+.practice-option:hover,
+.practice-option:focus-visible {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.practice-option:disabled {
+  cursor: default;
+}
+
+.practice-option span {
+  width: 100%;
+  font-family: "Geeza Pro", "Noto Naskh Arabic", "Noto Sans Arabic",
+    "Arabic Typesetting", serif;
+  font-size: 52px;
+  font-weight: 500;
+  line-height: 1.25;
+  text-align: center;
+}
+
+.practice-option.is-correct {
+  border-color: #2b6b4f;
+  color: #2b6b4f;
+  box-shadow: inset 0 -3px #2b6b4f;
+}
+
+.practice-option.is-wrong {
+  border-color: var(--accent);
+  color: var(--accent);
+  box-shadow: inset 0 -3px var(--accent);
+}
+
+.practice-actions {
+  display: flex;
+  min-height: 42px;
+  margin-top: 24px;
+  align-items: center;
+  justify-content: center;
+}
+
+.practice-primary {
+  min-width: 150px;
+  min-height: 42px;
+  padding: 9px 18px;
+  border: 1px solid var(--text);
+  border-radius: 3px;
+  background: var(--text);
+  color: var(--bg);
+  cursor: pointer;
+  font: 650 12px var(--sans);
+}
+
+.practice-primary:hover,
+.practice-primary:focus-visible {
+  border-color: var(--accent);
+  background: var(--accent);
+}
+
+.practice-feedback {
+  min-height: 22px;
+  margin: 14px 0 0;
+  color: var(--muted);
+  font-size: 13px;
+  text-align: center;
+}
+
+.practice-feedback[data-state="success"] {
+  color: #2b6b4f;
+}
+
+.practice-feedback[data-state="error"] {
+  color: var(--accent);
+}
+
+.arabic-audio-reference {
+  margin-top: 34px;
+  border-bottom: 1px solid var(--line);
+}
+
+.arabic-audio-reference > summary {
+  min-height: 54px;
+  padding: 16px 0;
+  color: var(--muted);
+  cursor: pointer;
+  font: 600 11px var(--mono);
+  list-style-position: inside;
+  text-transform: uppercase;
+}
+
+.arabic-audio-reference > summary:hover,
+.arabic-audio-reference > summary:focus-visible {
+  color: var(--accent);
+}
+
+.arabic-audio-reference .speech-panel {
+  margin-top: 0;
+}
+
 .arabic-practice-band + .section-group {
   padding-top: 88px;
 }
@@ -941,6 +1269,19 @@ a {
     font-size: 62px;
   }
 
+  .arabic-practice-summary {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .practice-stat:nth-child(3) {
+    border-top: 1px solid var(--line);
+    border-left: 0;
+  }
+
+  .practice-stat:nth-child(4) {
+    border-top: 1px solid var(--line);
+  }
+
   .arabic-stage {
     grid-template-columns: 190px minmax(0, 1fr);
   }
@@ -1117,6 +1458,74 @@ a {
 
   .arabic-practice-band {
     padding: 64px 0 30px;
+  }
+
+  .practice-stat {
+    min-height: 88px;
+    padding: 16px 14px;
+  }
+
+  .practice-stat strong {
+    font-size: 18px;
+  }
+
+  .practice-mode-switch {
+    margin-right: -16px;
+    margin-left: -16px;
+    padding: 0 16px;
+  }
+
+  .practice-mode-switch button {
+    min-width: 108px;
+    padding: 0 14px;
+  }
+
+  .practice-question-head {
+    align-items: flex-start;
+  }
+
+  .practice-question-head > div {
+    padding: 15px 0;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 3px;
+  }
+
+  .practice-reset {
+    padding-top: 17px;
+  }
+
+  .practice-question {
+    min-height: 510px;
+    padding: 38px 0 44px;
+  }
+
+  .practice-prompt {
+    max-width: 300px;
+    font-size: 17px;
+  }
+
+  .practice-stimulus {
+    min-height: 100px;
+    font-size: 64px;
+  }
+
+  .practice-stimulus[lang="en"] {
+    font-size: 40px;
+  }
+
+  .practice-options {
+    min-height: 226px;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+  }
+
+  .practice-option {
+    min-height: 108px;
+  }
+
+  .practice-option span {
+    font-size: 46px;
   }
 
   .arabic-stage {
